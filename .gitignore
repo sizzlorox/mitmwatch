@@ -1,0 +1,13 @@
+# Build artifacts
+/mitmwatch
+/mitmwatch.exe
+/mitmwatch-linux-arm64
+/mitmwatch-linux-amd64
+/mitmwatch-darwin-*
+*.tmp
+
+# Local, never committed: real deploy host addresses and private tweaks
+Makefile.local
+
+# Refreshed-roots staging file
+/internal/roots/cacert.pem.new

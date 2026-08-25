@@ -1,0 +1,25 @@
+[Unit]
+Description=mitmwatch witness
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mitmwatch witness serve --config /etc/mitmwatch/mitmwatch.toml
+Restart=always
+RestartSec=10
+# It reads the internet and writes only its own state. No raw capture, so no
+# CAP_NET_RAW - the witness is never a pivot.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mitmwatch
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

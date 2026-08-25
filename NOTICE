@@ -1,0 +1,10 @@
+mitmwatch
+Copyright 2026 mitmwatch contributors
+
+Licensed under the Apache License, Version 2.0. See LICENSE for terms.
+
+This product embeds the Mozilla CA certificate bundle
+(internal/roots/cacert.pem) as the trust anchor for certificate
+verification. That bundle is extracted and distributed by the curl
+project under the Mozilla Public License 2.0:
+  https://curl.se/docs/caextract.html

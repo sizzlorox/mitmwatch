@@ -1,0 +1,10 @@
+# Holds the Linode API token.
+.env
+
+# State records the generated root password in cleartext, and the token if it were ever
+# written to a var file. Neither belongs in git.
+terraform.tfstate
+terraform.tfstate.*
+*.tfvars
+.terraform/
+crash.log

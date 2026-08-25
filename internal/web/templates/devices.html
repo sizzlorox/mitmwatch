@@ -1,0 +1,44 @@
+{{define "devices.html"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Devices - mitmwatch</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b21;--edge:#262a33;--ink:#e8eaed;--dim:#9aa0aa;--learn:#58a6ff}
+  @media (prefers-color-scheme: light){:root{--bg:#f6f7f9;--card:#fff;--edge:#e2e5ea;--ink:#1b1f24;--dim:#5b6472}}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{max-width:900px;margin:0 auto;padding:20px 16px 64px}
+  a{color:var(--learn)}
+  h1{font-size:18px}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--edge);border-radius:12px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--edge);font-size:14px}
+  th{color:var(--dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  tr:last-child td{border-bottom:none}
+  .mac{color:var(--dim);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+  .empty{color:var(--dim);padding:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p><a href="/">&larr; Back</a></p>
+  <h1>Devices on {{.Network}}</h1>
+  {{if .Devices}}
+  <table>
+    <tr><th>Address</th><th>Hardware</th><th>Name</th><th>First seen</th></tr>
+    {{range .Devices}}
+    <tr>
+      <td>{{.IP}}</td>
+      <td class="mac">{{.MAC}}</td>
+      <td>{{if .Name}}{{.Name}}{{else}}&mdash;{{end}}</td>
+      <td>{{.First.Format "Jan 2 15:04"}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="empty">No devices recorded yet. The sensor lists hosts it has seen on the network.</p>
+  {{end}}
+</div>
+</body>
+</html>{{end}}

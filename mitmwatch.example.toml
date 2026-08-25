@@ -1,0 +1,158 @@
+# mitmwatch configuration.
+#
+# Every value below is a default. Copy this file to the path `mitmwatch doctor`
+# reports under "config" and change only what you need: sections you leave out
+# keep their defaults, and weights you leave out keep theirs.
+
+[sensor]
+role       = "roaming"       # "always-on" for a Pi or a server, "roaming" for a laptop.
+                             # Only always-on sensors arm the witness dead-man's switch,
+                             # so a laptop that sleeps does not raise a false alarm.
+capture    = "auto"          # auto | pcap | raw | poll. Phase 0 is always poll.
+interfaces = []              # empty means the interface carrying the default route.
+serve_dns  = false
+
+# How long one pass listens on the wire. Five seconds is enough for ARP
+# poisoning, which every common tool repeats about once a second - it has to,
+# or the real router's replies win the race back. It is NOT enough for anything
+# that happens once; that needs the resident sensor daemon.
+capture_window_sec = 5
+
+# The status dashboard. Empty disables it. ":8080" listens on every interface -
+# reachable from any device on your LAN, which is what you want on a Pi that
+# other people in the house should be able to open. "127.0.0.1:8080" is this
+# device only, which is right for a laptop. Plain HTTP on the LAN is deliberate:
+# a self-signed certificate would train the household to click through the exact
+# warning this tool exists to make them heed.
+#dashboard = ":8080"
+
+[learning]
+window_min = 10              # A brand-new network disagrees with everything. For this long,
+                             # only critical findings surface; the rest are listed as held.
+
+[tls]
+# Hosts to inspect. Pick ones you actually use, run by different companies -
+# the shared-key check needs more than one operator to be conclusive.
+pin = ["github.com", "www.google.com", "cloudflare-dns.com", "registry.npmjs.org", "viverse.com"]
+
+# Leave false until a witness exists. Learning issuers from a local first
+# observation on an already-intercepted machine would enrol the interceptor as
+# legitimate - the detector would teach itself to ignore the attack.
+learn_issuers = false
+
+# Optional. Naming the organisation you expect for a host turns on the issuer
+# check for it, and lets the shared-key rule tell "one CDN serving both" apart
+# from "one key impersonating two different companies".
+[tls.expect_issuers]
+# "github.com"     = "Sectigo Limited"
+# "www.google.com" = "Google Trust Services"
+
+[dns]
+anchors = ["a.root-servers.net", "one.one.one.one", "dns.google"]
+# The comparison channel. These are verified against the built-in certificate
+# list only, never this computer's - a channel that can itself be intercepted
+# would prove nothing. If they become unreachable, that is itself reported.
+doh = ["https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"]
+
+[sslstrip]
+# Hosts must answer plain http with a redirect AND send Strict-Transport-Security.
+# www.google.com looks like the obvious choice and is not one: it serves 200 over
+# http and sends no HSTS header, so it can never be checked for downgrade.
+hosts = ["github.com", "en.wikipedia.org", "www.cloudflare.com"]
+
+[nameres]
+# How many distinct names one host may answer for in a capture window before it
+# looks like a tool rather than a device. A printer answers for itself; a media
+# server for a few names; Responder for whatever was asked. Raise it if you run
+# a service-discovery bridge that legitimately answers broadly.
+#answer_threshold = 5
+
+[clock]
+ntp = ["pool.ntp.org", "time.cloudflare.com"]
+
+[alerts]
+# "log" is always on and never rate limited - a record with gaps is not a record.
+# "ntfy" needs no account and no app registration: create a topic name nobody
+# can guess, install the ntfy app, subscribe to it, and put the URL below.
+# "webhook" posts the same alert as JSON for anything else.
+sinks = ["log"]
+#ntfy_topic = "https://ntfy.sh/some-name-nobody-can-guess"
+#webhook    = "https://example.com/hook"
+
+# How long the same finding stays quiet on notification sinks before being
+# re-stated. Six hours means a persistent problem is repeated about four times a
+# day: often enough that it cannot be forgotten, rarely enough that it is never
+# noise. A resident sensor checking every two minutes would otherwise push
+# hundreds of notifications a day about one fact, and by the second morning the
+# household has muted the topic - which also mutes the next, different alert.
+cooldown_hours = 6
+
+# Scoring. These are deliberate guesses, to be recalibrated against the lab and
+# soak phases; they live here so that recalibration is not a code change.
+# Bands: info < 20, low 20, medium 40, high 60, critical 80. Scores add up per
+# target, so two medium findings about one host reach critical together.
+[weights]
+"truststore/root-added"        = 80   # a CA appeared that was not there before
+"arp/gateway-impersonation"    = 75   # two devices claiming to be your router, live on the wire
+"nameres/answers-everything"   = 70   # a host answering for names that are not its own (Responder)
+"nameres/contested-name"       = 45   # two devices claiming one network name
+"dhcp/rogue-gateway"           = 70   # something offering a gateway that is not your gateway
+"dhcp/wpad-offered"            = 65   # something pushing a proxy configuration url
+"dhcp/unexpected-server"       = 60   # a new device handing out network settings
+"dhcp/rogue-dns"               = 55   # something offering resolvers you do not use
+"dhcp/multiple-servers"        = 50   # corroboration only - a clipped sample can cause this
+"arp/ip-conflict"              = 65   # two devices claiming one address
+"nd/new-router"                = 65   # a new device advertising itself as your IPv6 router
+"arp/gateway-mac-changed"      = 60   # something else is answering for your router
+"arp/gateway-mac-shared"       = 55   # one device holds your router's address and its own
+"nd/rogue-dns"                 = 55   # your IPv6 router changed the resolver it hands out
+"tls/shared-leaf-key"          = 75   # one key serving companies that do not share one
+"tls/private-root"             = 70   # trusted here and nowhere else
+"tls/untrusted-root"           = 60   # trusted nowhere at all
+"sslstrip/plaintext-body"      = 60   # an always-encrypted site answered in the clear
+"clock/drift-major"            = 50   # over five minutes out
+"tls/witness-sct-unlogged"     = 50   # the witness confirms a certificate was never logged
+"dns/nxdomain-to-a"            = 50   # an address invented for a name that does not exist
+"truststore/young-root"        = 45   # recently created CA, not one browsers ship with
+"dns/resolver-disagrees"       = 45
+"tls/caa-violation"            = 40   # a CA the site's own DNS (CAA record) does not authorise
+"witness/sensor-silent"        = 40   # a sensor that should be reporting went quiet
+"tls/no-sct"                   = 35   # certificate never published to a public log
+"clock/drift-minor"            = 30
+"tls/issuer-unknown"           = 30
+"tls/downgrade"                = 25   # negotiated TLS 1.0 or 1.1
+"sslstrip/no-hsts"             = 20   # a host that used to promise https stopped
+"arp/gateway-unresolved"       = 10   # the router stopped answering; this check is blind
+"tls/handshake-failed"         = 15
+"dns/doh-unreachable"          = 15   # the independent comparison channel is blocked
+"witness/unreachable"          = 15   # the outside vantage point cannot be reached
+"truststore/unreadable"        = 10   # the trust store could not be read at all
+"tls/system-store-unavailable" = 10
+"tls/leaf-rotated"             = 5    # routine; only matters if the issuer changed too
+"tls/witness-root-mismatch"    = 5    # corroborator only: sensor and witness reach different roots
+"sslstrip/host-unsuitable"     = 5    # a config problem, not an attack
+
+[witness]
+# The cross-vantage check. A witness on another network and ASN sees the real
+# certificate for a host; when your view and its view disagree in a way an
+# honest certificate cannot produce, something between you and the internet is
+# intercepting. Set up with `mitmwatch witness pair`.
+#
+# --- sensor side ---
+#sync = true
+#addr = "203.0.113.10:8443"        # the witness host:port
+#pin  = "sha256/..."               # the witness's key, filled by `witness pair`
+#beat_sec = 30
+#key_dir  = "/var/lib/mitmwatch/witness"
+#
+# --- witness side (same binary, on its own box, its own config) ---
+#listen     = ":8443"
+#allow_pins = ["sha256/..."]       # accepted sensor keys, from `witness allow`
+#tick_interval = "5m"
+#confirm_ticks = 3                 # ticks a host must be steady before it is scored
+#freshness     = "10m"
+#history_path  = "/var/lib/mitmwatch/witness/history.json"
+
+# --- not yet implemented -----------------------------------------------------
+# [ct]        owned_domains        phase 2.1
+# [inbound]   endpoints            phase 2.1

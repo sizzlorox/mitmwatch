@@ -1,0 +1,256 @@
+#cloud-config
+# mitmwatch witness host.
+#
+# Provisions the BOX only. The mitmwatch binary is pushed separately, so redeploying it never
+# means rebuilding a server.
+#
+# THE GOVERNING CONSTRAINT: this host's value is being an ordinary, uncompromised machine on
+# somebody else's network. A witness that is itself modified is worse than no witness, because
+# it corroborates falsely. So the hardening below is all subtraction - fewer ways in, fewer
+# services, fewer stale packages. Nothing here installs a certificate authority, a TLS proxy,
+# an inspection agent, or anything else that sits between this box and the internet. If a
+# future change would put something in that path, it does not belong on this host.
+#
+# Keep the package list minimal and CHECK EVERY NAME EXISTS on the target release. cloud-init
+# runs one apt-get for the whole list, so a single bad name aborts all of it - and because the
+# package module runs before runcmd, everything after it is skipped too. That is exactly what
+# happened on the first build of this box: 'ntpsec-ntpdate' does not exist on bookworm and
+# took the entire provisioning run with it.
+
+# Stop grub-pc taking the whole provisioning run down with it.
+#
+# Linode hands the instance a raw filesystem with no partition table, so grub-install has
+# nowhere to embed and fails outright: "File system 'ext2' doesn't support embedding" ->
+# "blocklists are invalid" -> "grub-install failure for /dev/sda". It can never succeed on
+# this platform. A package_upgrade pulls a grub-pc whose postinst runs grub-install anyway,
+# dpkg exits 1, apt exits 100, and cloud-init reports the whole boot as failed even though
+# every package installed correctly - which is worse than it sounds, because a provisioning
+# script that always says "error" is one nobody reads when it means it.
+#
+# Preseeding does not work, and both ways of trying were tested on the box: a
+# debconf-set-selections line will not clear the non-empty install_devices the image ships,
+# and a debconf-communicate SET is overwritten again when grub-pc's own config script
+# re-detects the disk during the upgrade. Holding the packages is what actually holds.
+#
+# Safe here: Linode does not boot this disk's MBR, and grub is not network-facing. To take
+# grub updates later, unhold and run grub-install by hand against a properly partitioned disk.
+bootcmd:
+  - [ apt-mark, hold, grub-pc, grub-pc-bin, grub2-common, grub-common ]
+
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates      # the trust store under test; a minimal image may not carry it
+  - curl
+  - openssl
+  - unattended-upgrades  # a box that must stay trustworthy for months cannot run stale packages
+  - apt-listchanges      # unattended-upgrades wants it to summarise what it changed
+  - fail2ban             # belt and braces: the firewall should already make this unreachable
+  - needrestart          # restart services after a library update, so no reboot is needed
+
+# Direct root login is disabled below, so there has to be another way in first.
+users:
+  - name: ops
+    # adm and systemd-journal are read-only log access. Without them `journalctl -u`
+    # returns EMPTY rather than refusing - so the soak looks dead when it is running
+    # fine, which is a worse failure than an error would be.
+    groups: [sudo, adm, systemd-journal]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    lock_passwd: true
+    ssh_authorized_keys: []   # filled by cloud-init from the instance's authorized_keys
+
+  - name: mitmwatch
+    system: true
+    shell: /usr/sbin/nologin
+    home: /opt/mitmwatch
+
+# Linode installs the instance key for root. Copy it to ops before root login is closed off,
+# otherwise this reboots into a box nobody can reach.
+ssh_pwauth: false
+disable_root: false
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-mitmwatch.conf
+    permissions: '0644'
+    content: |
+      # Keys only, one account, small blast radius.
+      #
+      # The root password the Linode API forced us to set is random and recorded nowhere but
+      # tofu state. Nothing should ever be able to use it, so every path that could is closed.
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      AuthenticationMethods publickey
+      PermitEmptyPasswords no
+      AllowUsers ops
+
+      # A key either works on the first try or it does not. Ten attempts only helps someone
+      # spraying keys.
+      MaxAuthTries 3
+      MaxSessions 4
+      LoginGraceTime 20
+
+      # This host is a vantage point, never a pivot. Forwarding would let anyone who reaches
+      # it use it to reach somewhere else, which is the one thing a witness must not become.
+      AllowTcpForwarding no
+      AllowAgentForwarding no
+      AllowStreamLocalForwarding no
+      GatewayPorts no
+      PermitTunnel no
+      X11Forwarding no
+
+      ClientAliveInterval 300
+      ClientAliveCountMax 2
+
+  - path: /etc/sysctl.d/99-mitmwatch.conf
+    permissions: '0644'
+    content: |
+      # ICMP redirects are themselves a man-in-the-middle technique: accepting one lets a
+      # neighbour reroute this host's traffic through itself. On the machine whose job is to
+      # notice exactly that happening elsewhere, honouring them would be absurd.
+      net.ipv4.conf.all.accept_redirects = 0
+      net.ipv4.conf.default.accept_redirects = 0
+      net.ipv4.conf.all.secure_redirects = 0
+      net.ipv6.conf.all.accept_redirects = 0
+      net.ipv6.conf.default.accept_redirects = 0
+
+      # This box routes nothing and speaks for nobody else.
+      net.ipv4.ip_forward = 0
+      net.ipv4.conf.all.send_redirects = 0
+      net.ipv4.conf.default.send_redirects = 0
+
+      # Source routing lets the sender pick the return path. There is no legitimate use here.
+      net.ipv4.conf.all.accept_source_route = 0
+      net.ipv6.conf.all.accept_source_route = 0
+
+      # Reverse-path filtering and SYN cookies: cheap, standard, no downside on a single-homed host.
+      net.ipv4.conf.all.rp_filter = 1
+      net.ipv4.conf.default.rp_filter = 1
+      net.ipv4.tcp_syncookies = 1
+
+      net.ipv4.icmp_echo_ignore_broadcasts = 1
+      net.ipv4.icmp_ignore_bogus_error_responses = 1
+      net.ipv4.conf.all.log_martians = 1
+
+      kernel.kptr_restrict = 2
+      kernel.dmesg_restrict = 1
+      fs.protected_hardlinks = 1
+      fs.protected_symlinks = 1
+
+  - path: /etc/fail2ban/jail.d/sshd.local
+    permissions: '0644'
+    content: |
+      # The Linode firewall should already make this unreachable from anywhere but the
+      # operator's address. This is what catches the case where that list has been widened
+      # and nobody narrowed it again.
+      [DEFAULT]
+      # The operator's own address, taken from the same variable that writes the firewall
+      # rule. Banning it would lock out the only CIDR permitted through, on a box where SSH
+      # is the only open port.
+      ignoreip = 127.0.0.1/8 ::1 ${ssh_allow_cidrs}
+
+      [sshd]
+      enabled = true
+      # Bookworm logs authentication to the journal and ships no /var/log/auth.log, so
+      # fail2ban's default file backend finds nothing, refuses to start the jail, and takes
+      # the whole service down with it: "Have not found any log file for sshd jail".
+      backend = systemd
+      mode = aggressive
+      maxretry = 3
+      findtime = 10m
+      bantime = 1h
+
+  - path: /etc/apt/apt.conf.d/51mitmwatch-unattended
+    permissions: '0644'
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+      Unattended-Upgrade::Mail "";
+      // Deliberately NOT rebooting on its own. From phase 2 an absent witness is a signal -
+      // the sensor's dead-man's switch reads silence as possible interference - and a box
+      // that reboots itself at 04:00 would manufacture that signal every few weeks. Kernel
+      // updates are applied on the next deliberate restart; needrestart handles the rest.
+      Unattended-Upgrade::Automatic-Reboot "false";
+
+  - path: /etc/systemd/system/mitmwatch-check.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=mitmwatch one-shot check
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      # check exits 1 when it finds something, which is the entire point of it. systemd must
+      # not read that as a unit failure, or the timer would be marked broken by the first
+      # real detection - the exact moment it matters most.
+      SuccessExitStatus=0 1
+      ExecStart=/usr/local/bin/mitmwatch check
+      # It only ever reads. Nothing here needs to write outside its own state directory.
+      ProtectSystem=strict
+      ReadWritePaths=/var/lib/mitmwatch
+      ProtectHome=yes
+      PrivateTmp=yes
+      NoNewPrivileges=yes
+      ProtectKernelTunables=yes
+      ProtectControlGroups=yes
+      RestrictSUIDSGID=yes
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/mitmwatch-check.timer
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Run mitmwatch check every 15 minutes
+
+      [Timer]
+      OnBootSec=3min
+      OnUnitActiveSec=15min
+      # Without jitter every sensor on earth probes the same hosts on the same second, which
+      # looks like a botnet from the outside and is a worse experiment from the inside.
+      RandomizedDelaySec=120
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+  - path: /opt/mitmwatch/README
+    permissions: '0644'
+    content: |
+      mitmwatch witness.
+
+      Today: the Linux target for code that cannot be executed on the development machine,
+      and the clean-network baseline that phase 0 must produce before it can exit.
+
+      From phase 2: the independent vantage point. It runs the same probes against the same
+      targets at the same moment as the sensor, and keeps the history that answers "have I
+      ever seen this certificate for this host before".
+
+      DO NOT install anything here that intercepts, proxies, or inspects TLS, and do not add
+      a certificate authority to this machine's trust store. A witness that is itself
+      modified is worse than no witness, because it corroborates falsely.
+
+      Deploy:  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o mitmwatch ./cmd/mitmwatch
+               scp mitmwatch ops@<ip>:/tmp/ && ssh ops@<ip> sudo install -m0755 /tmp/mitmwatch /usr/local/bin/
+      Soak:    journalctl -u mitmwatch-check.service
+
+runcmd:
+  # Copy root's key to ops BEFORE root login is closed. Order matters: get this wrong and the
+  # box comes up with no way in at all.
+  - [ bash, -c, "install -d -m 0700 -o ops -g ops /home/ops/.ssh" ]
+  - [ bash, -c, "cp /root/.ssh/authorized_keys /home/ops/.ssh/authorized_keys" ]
+  - [ bash, -c, "chown ops:ops /home/ops/.ssh/authorized_keys && chmod 0600 /home/ops/.ssh/authorized_keys" ]
+  - [ bash, -c, "test -s /home/ops/.ssh/authorized_keys || (echo 'REFUSING to disable root login: ops has no key' >&2 && rm -f /etc/ssh/sshd_config.d/99-mitmwatch.conf)" ]
+  - [ sshd, -t ]
+  - [ systemctl, restart, ssh ]
+  - [ sysctl, --system ]
+  - [ systemctl, enable, --now, fail2ban ]
+  - [ systemctl, enable, --now, unattended-upgrades ]
+  - [ install, -d, -o, mitmwatch, -g, mitmwatch, -m, '0750', /var/lib/mitmwatch ]
+  - [ systemctl, daemon-reload ]
+  - [ systemctl, enable, --now, mitmwatch-check.timer ]

@@ -1,0 +1,29 @@
+[Unit]
+Description=mitmwatch sensor
+Documentation=https://github.com/sizzlorox/mitmwatch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mitmwatch sensor
+Restart=always
+RestartSec=10
+# It reads the wire and writes only its own state.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mitmwatch
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# Raw capture needs CAP_NET_RAW and nothing else. Dropping the rest means a
+# compromised sensor cannot become a pivot on the network it watches.
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target

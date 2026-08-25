@@ -1,0 +1,196 @@
+{{define "home.html"}}<!doctype html>
+<html lang="en" data-state="{{.State}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="15">
+<link rel="icon" href="{{favicon .State}}">
+<title>mitmwatch - {{.Network}}</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#181b21; --edge:#262a33; --ink:#e8eaed; --dim:#9aa0aa;
+    --ok:#2ea043; --warn:#d29922; --bad:#f85149; --learn:#58a6ff; --unknown:#6e7681;
+    --accent:var(--unknown);
+  }
+  html[data-state="ok"]{--accent:var(--ok)}
+  html[data-state="attention"]{--accent:var(--bad)}
+  html[data-state="learning"]{--accent:var(--learn)}
+  @media (prefers-color-scheme: light){
+    :root{--bg:#f6f7f9;--card:#fff;--edge:#e2e5ea;--ink:#1b1f24;--dim:#5b6472}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);color:var(--ink);overflow-x:hidden}
+  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 64px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  header h1{font-size:15px;font-weight:600;color:var(--dim);margin:0;letter-spacing:.02em}
+  header .net{font-size:13px;color:var(--dim)}
+  .banner{margin:16px 0 10px;padding:22px 20px;border-radius:14px;background:var(--card);
+    border:1px solid var(--edge);border-left:6px solid var(--accent);display:flex;gap:16px;align-items:center}
+  .banner .dot{width:14px;height:14px;border-radius:50%;background:var(--accent);flex:none;
+    box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 25%,transparent)}
+  .banner h2{margin:0;font-size:22px}
+  .banner .sub{color:var(--dim);font-size:13px;margin-top:2px}
+  .facts{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 4px}
+  .fact{font-size:12px;color:var(--dim);background:var(--card);border:1px solid var(--edge);
+    border-radius:999px;padding:5px 12px;display:flex;align-items:center;gap:6px}
+  .fact b{color:var(--ink);font-weight:600}
+  .dot2{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot2.ok{background:var(--ok)} .dot2.bad{background:var(--bad)} .dot2.none{background:var(--unknown)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin:16px 0}
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:14px}
+  .card .head{display:flex;align-items:center;gap:8px;font-weight:600}
+  .card .icon{font-size:18px}
+  .card .line{color:var(--dim);font-size:13px;margin-top:6px}
+  .pill{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+    padding:2px 8px;border-radius:999px;border:1px solid var(--edge);color:var(--dim)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,var(--edge))}
+  .pill.attention{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 50%,var(--edge))}
+  .pill.learning{color:var(--learn);border-color:color-mix(in srgb,var(--learn) 50%,var(--edge))}
+  h3.sec{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin:26px 0 10px;
+    display:flex;align-items:center;gap:8px}
+  h3.sec .count{font-size:11px;color:var(--dim);background:var(--card);border:1px solid var(--edge);
+    border-radius:999px;padding:1px 8px}
+  .alert{background:var(--card);border:1px solid var(--edge);border-left:5px solid var(--bad);
+    border-radius:12px;padding:16px;margin-bottom:12px}
+  .alert h4{margin:0 0 4px;font-size:17px}
+  .alert .band{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--bad)}
+  .alert .mean{margin:8px 0 0}
+  .alert .act{margin:8px 0 0;padding:10px 12px;background:color-mix(in srgb,var(--warn) 12%,transparent);
+    border-radius:8px;font-size:14px}
+  .alert details{margin-top:10px}
+  .alert summary{cursor:pointer;color:var(--dim);font-size:13px}
+  .alert table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+  .alert td{padding:3px 8px;border-top:1px solid var(--edge);vertical-align:top}
+  .alert td.k{color:var(--dim);white-space:nowrap;width:1%}
+  .cols{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;align-items:start}
+  .cols>*{min-width:0}
+  @media (max-width:680px){.cols{grid-template-columns:1fr}}
+  /* On a phone the hardware address is the widest, least-needed column: drop it
+     so the table fits without a sideways scroll. */
+  @media (max-width:560px){
+    table.dev th:nth-child(3),table.dev td:nth-child(3){display:none}
+  }
+  .panel{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:14px 16px}
+  .panel h3.sec{margin:2px 0 10px}
+  .tablewrap{overflow-x:auto}
+  table.dev{width:100%;border-collapse:collapse;font-size:13px}
+  table.dev th{text-align:left;font-weight:600;color:var(--dim);font-size:11px;text-transform:uppercase;
+    letter-spacing:.04em;padding:0 8px 6px 0;border-bottom:1px solid var(--edge)}
+  table.dev td{padding:7px 8px 7px 0;border-bottom:1px solid var(--edge);vertical-align:top}
+  table.dev tr:last-child td{border-bottom:none}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+  .dim{color:var(--dim)}
+  ul.log{list-style:none;margin:0;padding:0}
+  ul.log li{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--edge);font-size:13px}
+  ul.log li:last-child{border-bottom:none}
+  ul.log li::before{content:"";width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px;background:var(--dim)}
+  ul.log li.alert::before{background:var(--bad)}
+  ul.log li.clear::before{background:var(--ok)}
+  ul.log li.system::before{background:var(--learn)}
+  ul.log .when{color:var(--dim);white-space:nowrap;flex:none;min-width:78px}
+  .clear{color:var(--dim);padding:8px 0}
+  footer{margin-top:32px;color:var(--dim);font-size:12px;display:flex;gap:16px;flex-wrap:wrap}
+  a{color:var(--learn)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MITMWATCH</h1>
+    <span class="net">{{.Network}} &middot; last checked {{since .LastCheck}}</span>
+  </header>
+
+  <div class="banner">
+    <span class="dot"></span>
+    <div>
+      <h2>{{.Sentence}}</h2>
+      <div class="sub">Network "{{.Network}}" &middot; trust level {{.Trust}}</div>
+    </div>
+  </div>
+
+  <div class="facts">
+    <span class="fact"><b>Trust</b> {{.Trust}}</span>
+    {{if .Tier}}<span class="fact"><b>Watching</b> {{.Tier}}</span>{{end}}
+    <span class="fact"><b>Outside check</b>
+      {{if .Witness.Configured}}
+        {{if .Witness.Connected}}<span class="dot2 ok"></span>connected{{else}}<span class="dot2 bad"></span>link down{{end}}
+      {{else}}<span class="dot2 none"></span>not set up{{end}}
+    </span>
+    {{if .Uptime}}<span class="fact"><b>Running</b> {{.Uptime}}</span>{{end}}
+  </div>
+
+  <div class="grid">
+    {{range .Areas}}
+    <div class="card">
+      <div class="head"><span class="icon">{{icon .Key}}</span>{{.Name}}
+        <span class="pill {{.State}}">{{.State}}</span></div>
+      <div class="line">{{.Line}}</div>
+    </div>
+    {{end}}
+  </div>
+
+  {{if .Alerts}}
+  <h3 class="sec">Needs your attention</h3>
+  {{range .Alerts}}
+    {{range .Findings}}
+    <div class="alert">
+      <div class="band">{{upper .Band}} &middot; score {{.Score}}</div>
+      <h4>{{.Title}}</h4>
+      {{if .Meaning}}<p class="mean">{{.Meaning}}</p>{{end}}
+      {{if .Action}}<div class="act"><strong>What to do:</strong> {{.Action}}</div>{{end}}
+      {{if .Evidence}}
+      <details><summary>Technical details</summary>
+        <table>
+        {{range $k,$v := .Evidence}}<tr><td class="k">{{$k}}</td><td>{{$v}}</td></tr>{{end}}
+        </table>
+      </details>{{end}}
+    </div>
+    {{end}}
+  {{end}}
+  {{else}}
+  <h3 class="sec">Status</h3>
+  <div class="clear">Nothing to report right now. {{if gt .Held 0}}{{.Held}} finding(s) held back while learning.{{end}}</div>
+  {{end}}
+
+  <div class="cols">
+    <div class="panel">
+      <h3 class="sec">Devices <span class="count">{{.Devices}}</span></h3>
+      {{if .DeviceList}}
+      <div class="tablewrap">
+      <table class="dev">
+        <thead><tr><th>Name</th><th>Address</th><th>Hardware</th><th>First seen</th></tr></thead>
+        <tbody>
+        {{range .DeviceList}}
+          <tr>
+            <td>{{if .Name}}{{.Name}}{{else}}<span class="dim">unnamed</span>{{end}}</td>
+            <td class="mono">{{.IP}}</td>
+            <td class="mono dim">{{.MAC}}</td>
+            <td class="dim">{{since .First}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+      </div>
+      {{else}}<div class="clear">No devices seen yet.</div>{{end}}
+    </div>
+
+    <div class="panel">
+      <h3 class="sec">Activity</h3>
+      {{if .Events}}
+      <ul class="log">
+      {{range .Events}}
+        <li class="{{.Kind}}"><span class="when">{{since .When}}</span><span class="what">{{.Text}}</span></li>
+      {{end}}
+      </ul>
+      {{else}}<div class="clear">Nothing has changed since the sensor started.</div>{{end}}
+    </div>
+  </div>
+
+  <footer>
+    <a href="/devices">All devices ({{.Devices}})</a>
+    <span>mitmwatch watches this network and this device. It cannot see attacks aimed only at other machines.</span>
+  </footer>
+</div>
+</body>
+</html>{{end}}
