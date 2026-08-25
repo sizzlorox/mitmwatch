@@ -154,13 +154,14 @@ type env struct {
 	firstDeliver bool
 
 	// Dashboard read-model state, maintained across cycles by the sensor.
-	tier        string          // friendly capture-tier label ("the wire" / "device tables")
-	since       time.Time       // when this sensor process started, for uptime
-	events      []web.Event     // bounded activity log, oldest first
-	alerted     map[string]bool // targets currently in an actionable alert, for raise/clear
-	sawLearning bool            // observed the learning window while it was open
-	learnedOnce bool            // emitted the "finished learning" event already
-	witnessUp   bool            // last witness-link state, for connect/disconnect events
+	tier        string               // friendly capture-tier label ("the wire" / "device tables")
+	since       time.Time            // when this sensor process started, for uptime
+	events      []web.Event          // bounded activity log, oldest first
+	alerted     map[string]bool      // targets currently in an actionable alert, for raise/clear
+	sawLearning bool                 // observed the learning window while it was open
+	learnedOnce bool                 // emitted the "finished learning" event already
+	witnessUp   bool                 // last witness-link state, for connect/disconnect events
+	nameCache   map[string]nameEntry // reverse-DNS device names, cached
 }
 
 // recentFindings is one probe's last output with an expiry.

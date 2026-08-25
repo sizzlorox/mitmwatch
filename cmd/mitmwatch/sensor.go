@@ -250,7 +250,7 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 			Alerts:   res.Alerts,
 			Held:     res.Held,
 			Areas:    buildAreas(res.Alerts, res.Held, e.profile.Learning()),
-			Devices:  e.dashboardDevices(),
+			Devices:  e.dashboardDevices(ctx),
 			Tier:     e.tier,
 			Witness: web.WitnessCard{
 				Configured: wv.Configured, Connected: wv.Available,

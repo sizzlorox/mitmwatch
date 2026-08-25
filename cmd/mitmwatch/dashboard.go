@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sizzlorox/mitmwatch/internal/core/verdict"
@@ -158,7 +159,7 @@ func serveDashboard(ctx context.Context, addr string, state *web.State) (*http.S
 
 // dashboardDevices reads the arp probe's neighbour table out of the profile, so
 // the Devices page shows what the sensor has actually seen.
-func (e *env) dashboardDevices() []web.Device {
+func (e *env) dashboardDevices(ctx context.Context) []web.Device {
 	snap, ok := e.profile.Snapshots["arp"]
 	if !ok || snap.Empty() {
 		return nil
@@ -169,13 +170,96 @@ func (e *env) dashboardDevices() []web.Device {
 	if _, err := snap.Decode(&s); err != nil {
 		return nil
 	}
+	ips := make([]string, 0, len(s.Neighbors))
+	for ip := range s.Neighbors {
+		ips = append(ips, ip)
+	}
+	names := e.resolveNames(ctx, ips)
+
 	out := make([]web.Device, 0, len(s.Neighbors))
 	for ip, mac := range s.Neighbors {
-		out = append(out, web.Device{IP: ip, MAC: mac, First: e.profile.FirstSeen})
+		name := names[ip]
+		if name == "" && ip == e.net.GatewayIP {
+			name = "router"
+		}
+		out = append(out, web.Device{IP: ip, MAC: mac, Name: name, First: e.profile.FirstSeen})
 	}
 	// Stable order: by address, numerically where possible.
 	sortDevices(out)
 	return out
+}
+
+// nameEntry is one cached reverse-DNS result with its age.
+type nameEntry struct {
+	name string
+	at   time.Time
+}
+
+const nameTTL = 30 * time.Minute
+
+// resolveNames labels devices by their reverse-DNS (PTR) name, which on a home
+// network is the DHCP hostname the router hands back - "Johns-iPhone", "printer"
+// and so on. Results are cached, and looked up concurrently under one short
+// deadline so a slow or absent resolver never stalls the sensor cycle.
+//
+// This is cosmetic only. A device name is never used in any detection: a
+// resolver that lies mislabels a row and nothing more, and a lying local
+// resolver is exactly what the dns probe exists to catch. It deliberately uses
+// the system resolver (the router), because that is the one thing that knows the
+// local names - unlike the pinned comparison channels, which must not.
+func (e *env) resolveNames(ctx context.Context, ips []string) map[string]string {
+	if e.nameCache == nil {
+		e.nameCache = map[string]nameEntry{}
+	}
+	out := make(map[string]string, len(ips))
+	var todo []string
+	for _, ip := range ips {
+		if c, ok := e.nameCache[ip]; ok && time.Since(c.at) < nameTTL {
+			out[ip] = c.name
+			continue
+		}
+		todo = append(todo, ip)
+	}
+	if len(todo) == 0 {
+		return out
+	}
+
+	rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		res net.Resolver
+		sem = make(chan struct{}, 8)
+	)
+	for _, ip := range todo {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(ip string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			name := ""
+			if names, err := res.LookupAddr(rctx, ip); err == nil && len(names) > 0 {
+				name = cleanHost(names[0])
+			}
+			mu.Lock()
+			out[ip] = name
+			e.nameCache[ip] = nameEntry{name: name, at: time.Now()}
+			mu.Unlock()
+		}(ip)
+	}
+	wg.Wait()
+	return out
+}
+
+// cleanHost turns a PTR answer into a short label: no trailing dot, and just the
+// first component, so "Johns-iPhone.lan." becomes "Johns-iPhone".
+func cleanHost(ptr string) string {
+	h := strings.TrimSuffix(ptr, ".")
+	if i := strings.IndexByte(h, '.'); i > 0 {
+		h = h[:i]
+	}
+	return h
 }
 
 func sortDevices(d []web.Device) {
