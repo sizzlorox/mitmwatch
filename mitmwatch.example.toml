@@ -26,6 +26,14 @@ capture_window_sec = 5
 # warning this tool exists to make them heed.
 #dashboard = ":8080"
 
+# Active device discovery. Off by default: detection is passive. When on, each
+# pass nudges every host on the local subnet so quiet devices (smart plugs,
+# sensors, an idle rogue box) resolve into the device list - a full inventory,
+# like a router's own device page, rather than only who has spoken recently. The
+# nudge is a harmless UDP probe per host; it sends no ARP claims, so it never
+# trips the sensor's own gateway-impersonation detection.
+#discover = true
+
 [learning]
 window_min = 10              # A brand-new network disagrees with everything. For this long,
                              # only critical findings surface; the rest are listed as held.

@@ -37,6 +37,12 @@ type Sensor struct {
 	Capture    string   `toml:"capture"` // auto | pcap | raw | poll
 	Interfaces []string `toml:"interfaces"`
 	ServeDNS   bool     `toml:"serve_dns"`
+	// Discover turns on active device discovery: each pass nudges every host on
+	// the local subnet so quiet devices (smart plugs, sensors, an idle rogue
+	// box) resolve into the neighbour table, making the device list a full
+	// inventory rather than only who has spoken recently. Off by default -
+	// detection stays passive; this is the one thing that actively emits.
+	Discover bool `toml:"discover"`
 	// Dashboard is the LAN address the status page listens on, empty to
 	// disable. ":8080" listens on every interface; "127.0.0.1:8080" is
 	// localhost only, which is right for a laptop.

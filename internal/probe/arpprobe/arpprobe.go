@@ -87,6 +87,15 @@ func (Probe) Observe(ctx context.Context, in probe.Inputs) (probe.Snapshot, erro
 		Neighbors:  map[string]string{},
 	}
 
+	// Active discovery, opt-in. Nudge every host on the local subnet so quiet
+	// devices resolve into the neighbour table below - the difference between an
+	// inventory of "who has spoken recently" and one of everything that is here.
+	// It sends requests, never claims, so it cannot trip this probe's own
+	// gateway-impersonation detection.
+	if in.Config != nil && in.Config.Sensor.Discover {
+		discover(ctx, in.Network.Iface)
+	}
+
 	ns, err := osq.Neighbors(ctx)
 	if err != nil {
 		// An unreadable neighbour table is not an empty one. Saying so keeps
