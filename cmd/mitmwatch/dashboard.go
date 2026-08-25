@@ -178,9 +178,17 @@ func (e *env) dashboardDevices(ctx context.Context) []web.Device {
 
 	out := make([]web.Device, 0, len(s.Neighbors))
 	for ip, mac := range s.Neighbors {
+		// Best name available: the reverse-DNS hostname, else "router" for the
+		// gateway, else the manufacturer from the MAC. A device with none of
+		// these (an uncommon maker with no hostname) stays unnamed, its MAC in
+		// the next column.
 		name := names[ip]
-		if name == "" && ip == e.net.GatewayIP {
-			name = "router"
+		if name == "" {
+			if ip == e.net.GatewayIP {
+				name = "router"
+			} else {
+				name = vendorFor(mac)
+			}
 		}
 		out = append(out, web.Device{IP: ip, MAC: mac, Name: name, First: e.profile.FirstSeen})
 	}

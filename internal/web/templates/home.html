@@ -65,7 +65,10 @@
   .alert td.k{color:var(--dim);white-space:nowrap;width:1%}
   .cols{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;align-items:start}
   .cols>*{min-width:0}
-  @media (max-width:680px){.cols{grid-template-columns:1fr}}
+  /* The device table is dense (name, IP, MAC, age); two columns only earn their
+     keep on a wide screen. Below that, stack so the table gets the full width
+     and its cells stop wrapping mid-value. */
+  @media (max-width:900px){.cols{grid-template-columns:1fr}}
   /* On a phone the hardware address is the widest, least-needed column: drop it
      so the table fits without a sideways scroll. */
   @media (max-width:560px){
@@ -73,15 +76,19 @@
   }
   .panel{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:14px 16px}
   .panel h3.sec{margin:2px 0 10px}
-  .tablewrap{overflow-x:auto}
+  /* Grow with content, then cap and scroll inside rather than lengthen the page. */
+  .tablewrap{overflow:auto;max-height:62vh}
   table.dev{width:100%;border-collapse:collapse;font-size:13px}
   table.dev th{text-align:left;font-weight:600;color:var(--dim);font-size:11px;text-transform:uppercase;
-    letter-spacing:.04em;padding:0 8px 6px 0;border-bottom:1px solid var(--edge)}
-  table.dev td{padding:7px 8px 7px 0;border-bottom:1px solid var(--edge);vertical-align:top}
+    letter-spacing:.04em;padding:6px 8px 6px 0;border-bottom:1px solid var(--edge);white-space:nowrap;
+    position:sticky;top:0;background:var(--card)}
+  table.dev td{padding:7px 8px 7px 0;border-bottom:1px solid var(--edge);vertical-align:top;white-space:nowrap}
+  /* Names can be long (a full hostname); let only that column wrap. */
+  table.dev td:first-child{white-space:normal;word-break:break-word}
   table.dev tr:last-child td{border-bottom:none}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
   .dim{color:var(--dim)}
-  ul.log{list-style:none;margin:0;padding:0}
+  ul.log{list-style:none;margin:0;padding:0;max-height:62vh;overflow-y:auto}
   ul.log li{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--edge);font-size:13px}
   ul.log li:last-child{border-bottom:none}
   ul.log li::before{content:"";width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px;background:var(--dim)}
