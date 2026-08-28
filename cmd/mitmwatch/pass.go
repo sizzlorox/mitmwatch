@@ -32,6 +32,7 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 		findings []probe.Finding
 		errs     []error
 		adopted  = map[string]probe.Snapshot{}
+		observed = map[string]probe.Snapshot{}
 		errored  = map[string]bool{}
 	)
 	addErr := func(err error) {
@@ -114,6 +115,12 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 			mu.Lock()
 			defer mu.Unlock()
 			findings = append(findings, fs...)
+			// What was actually seen this pass, adopted or not. The baseline
+			// deliberately refuses a snapshot that reports an unabsorbed
+			// change, so anything reading Profile.Snapshots is reading the
+			// world as it was *before* an attack started - correct for
+			// comparison, wrong for "what is on the network right now".
+			observed[p.Name()] = snap
 			if snap.Degraded {
 				errs = append(errs, fmt.Errorf("%s: incomplete observation, baseline left untouched: %s",
 					p.Name(), snap.Err))
@@ -135,6 +142,21 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 	if src != nil {
 		if err := src.Err(); err != nil {
 			errs = append(errs, fmt.Errorf("capture on %s failed mid-pass: %w", src.Iface(), err))
+			// A source that died mid-pass fed its subscribers a closed channel,
+			// and a capture-fed probe reads that as "the window ended" - it
+			// returns a snapshot marked Captured with nothing in it, which is
+			// indistinguishable from a quiet network. Mark those probes as
+			// unable to observe, so the sensor keeps their previous findings
+			// instead of reporting the condition as resolved.
+			//
+			// Only for a dead source. Dropped frames mean an incomplete
+			// account, already reported below, and treating that as blindness
+			// would pin every finding forever on a busy segment.
+			for _, p := range probes {
+				if probe.WantsFrames(p) {
+					errored[p.Name()] = true
+				}
+			}
 		}
 		if st := src.Stats(); st.Dropped > 0 {
 			errs = append(errs, fmt.Errorf("capture on %s dropped %d frame(s) at the kernel: the "+
@@ -152,6 +174,7 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 	// observe this pass, so it keeps their previous findings rather than
 	// treating an errored cycle as "all clear".
 	e.erroredThisPass = errored
+	e.observedThisPass = observed
 
 	// Concurrency makes the order nondeterministic, and unstable output is
 	// unreadable in a diff and untestable in a soak.

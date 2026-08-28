@@ -157,42 +157,36 @@ func serveDashboard(ctx context.Context, addr string, state *web.State) (*http.S
 	return srv, nil
 }
 
-// dashboardDevices reads the arp probe's neighbour table out of the profile, so
-// the Devices page shows what the sensor has actually seen.
-func (e *env) dashboardDevices(ctx context.Context) []web.Device {
-	snap, ok := e.profile.Snapshots["arp"]
-	if !ok || snap.Empty() {
-		return nil
-	}
-	var s struct {
-		Neighbors map[string]string `json:"neighbors"`
-	}
-	if _, err := snap.Decode(&s); err != nil {
-		return nil
-	}
-	ips := make([]string, 0, len(s.Neighbors))
-	for ip := range s.Neighbors {
-		ips = append(ips, ip)
-	}
-	names := e.resolveNames(ctx, ips)
-
-	out := make([]web.Device, 0, len(s.Neighbors))
-	for ip, mac := range s.Neighbors {
-		// Best name available: the reverse-DNS hostname, else "router" for the
-		// gateway, else the manufacturer from the MAC. A device with none of
-		// these (an uncommon maker with no hostname) stays unnamed, its MAC in
-		// the next column.
-		name := names[ip]
-		if name == "" {
-			if ip == e.net.GatewayIP {
-				name = "router"
-			} else {
-				name = vendorFor(mac)
-			}
+// dashboardDevices renders the stored device history, one row per hardware
+// address.
+//
+// It reads the history rather than the live neighbour table because the table
+// cannot answer the question a person actually has. The table holds what this
+// host has resolved right now, so a device that was here yesterday and is
+// switched off today is simply missing from it - indistinguishable from one
+// that was never here at all. Present marks the ones seen in the last completed
+// cycle; the rest are shown with when they were last around.
+func (e *env) dashboardDevices() []web.Device {
+	hist := e.profile.DeviceList()
+	out := make([]web.Device, 0, len(hist))
+	for _, d := range hist {
+		ip := ""
+		if len(d.Addrs) > 0 {
+			ip = d.Addrs[0]
 		}
-		out = append(out, web.Device{IP: ip, MAC: mac, Name: name, First: e.profile.FirstSeen})
+		out = append(out, web.Device{
+			IP: ip, MAC: d.MAC, Name: d.Name,
+			FirstSeen: d.FirstSeen, LastSeen: d.LastSeen,
+			// "Present" is "seen in the cycle that produced this page", not
+			// "seen recently": the sensor stamps every sighting with the same
+			// cycle time, so the comparison is exact rather than a window.
+			Present: !e.lastCycle.IsZero() && d.LastSeen.Equal(e.lastCycle),
+			Random:  d.Random,
+			Addrs:   d.Addrs,
+		})
 	}
-	// Stable order: by address, numerically where possible.
+	// Stable order: connected first, then by address, numerically where
+	// possible, so the list does not reshuffle between page loads.
 	sortDevices(out)
 	return out
 }
@@ -271,8 +265,14 @@ func cleanHost(ptr string) string {
 }
 
 func sortDevices(d []web.Device) {
+	less := func(a, b web.Device) bool {
+		if a.Present != b.Present {
+			return a.Present
+		}
+		return lessIP(a.IP, b.IP)
+	}
 	for i := 1; i < len(d); i++ {
-		for j := i; j > 0 && lessIP(d[j].IP, d[j-1].IP); j-- {
+		for j := i; j > 0 && less(d[j], d[j-1]); j-- {
 			d[j], d[j-1] = d[j-1], d[j]
 		}
 	}

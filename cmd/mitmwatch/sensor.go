@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sizzlorox/mitmwatch/internal/core/alert"
+	"github.com/sizzlorox/mitmwatch/internal/core/baseline"
 	"github.com/sizzlorox/mitmwatch/internal/core/verdict"
 	"github.com/sizzlorox/mitmwatch/internal/probe"
 	"github.com/sizzlorox/mitmwatch/internal/web"
@@ -99,9 +100,22 @@ func cmdSensor(ctx context.Context, args []string) error {
 	fmt.Println()
 
 	e.since = time.Now()
-	if e.dash != nil {
-		e.events = append(e.events, web.Event{When: e.since, Kind: "system", Text: "Sensor started"})
+	// Pick the activity log back up where the last run left it. Without this a
+	// restart - which happens on every upgrade, and on any crash under
+	// Restart=always - blanks the record to a single line, and a household
+	// looking the morning after an incident sees a network on which nothing has
+	// ever happened.
+	evs, err := e.store.LoadEvents(e.profile.Key)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "activity log:", err)
 	}
+	e.events = evs
+	e.eventsTotal = len(evs)
+	e.addEvent(baseline.Event{When: e.since, Kind: "system", Text: "Sensor started"})
+	if err := e.store.SaveEvents(e.profile.Key, e.events); err != nil {
+		fmt.Fprintln(os.Stderr, "activity log:", err)
+	}
+	e.eventsDirty = false
 
 	// due tracks when each probe should next run, so a probe asking for 15
 	// minutes is not run every two just because another one is.
@@ -238,8 +252,20 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 		fmt.Fprintln(os.Stderr, "alert:", err)
 	}
 
+	// The device history and the activity log are recorded whether or not the
+	// dashboard is running. They are the record; the page is one way of reading
+	// it, and a headless sensor that remembered nothing would have nothing to
+	// show the moment someone turned the page on.
+	e.recordDeviceHistory(ctx, time.Now())
+	e.recordEvents(res)
+	if e.eventsDirty {
+		if err := e.store.SaveEvents(e.profile.Key, e.events); err != nil {
+			fmt.Fprintln(os.Stderr, "activity log:", err)
+		}
+		e.eventsDirty = false
+	}
+
 	if e.dash != nil {
-		e.recordEvents(res)
 		wv := e.witnessView()
 		e.dash.Update(web.Update{
 			Network:  e.net.Label(),
@@ -250,14 +276,16 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 			Alerts:   res.Alerts,
 			Held:     res.Held,
 			Areas:    buildAreas(res.Alerts, res.Held, e.profile.Learning()),
-			Devices:  e.dashboardDevices(ctx),
+			Devices:  e.dashboardDevices(),
 			Tier:     e.tier,
 			Witness: web.WitnessCard{
 				Configured: wv.Configured, Connected: wv.Available,
 				Addr: e.cfg.Witness.Addr, LastSeen: wv.ObservedAt,
 			},
-			Since:  e.since,
-			Events: e.events,
+			Since:       e.since,
+			Events:      webEvents(e.events),
+			EventsTotal: e.eventsTotal,
+			DevicesAt:   e.lastCycle,
 		})
 	}
 	return e.store.Save(e.profile)
@@ -281,6 +309,12 @@ func (e *env) refresh(ctx context.Context) error {
 	if err := e.store.Save(e.profile); err != nil {
 		return err
 	}
+	// The activity log and the device history are per network, and both are
+	// keyed by the profile. Carrying the in-memory log across would write what
+	// happened at the cafe into the file for home, and then show it there.
+	if err := e.store.SaveEvents(e.profile.Key, e.events); err != nil {
+		fmt.Fprintln(os.Stderr, "activity log:", err)
+	}
 	window := time.Duration(e.cfg.Learning.WindowMin) * time.Minute
 	if window <= 0 {
 		window = 10 * time.Minute
@@ -290,6 +324,19 @@ func (e *env) refresh(ctx context.Context) error {
 		return err
 	}
 	e.net, e.profile, e.fresh = n, prof, fresh
+
+	evs, err := e.store.LoadEvents(prof.Key)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "activity log:", err)
+	}
+	e.events, e.eventsTotal, e.eventsDirty = evs, len(evs), false
+	// Standing alerts belong to the network they were found on. Diffing this
+	// network's findings against the last one's would announce every alert as
+	// resolved on arrival, and raise them again on the way back.
+	e.alerted, e.heldSeen = nil, nil
+	e.lastCycle = time.Time{}
+	e.addEvent(baseline.Event{When: time.Now(), Kind: "system",
+		Text: "Network changed - now watching " + n.Label()})
 	fmt.Printf("network changed: now %s (profile %s, trust %s)\n", n.Label(), prof.Key, prof.Trust)
 	return nil
 }
@@ -335,52 +382,135 @@ func joinComma(s []string) string {
 	return out
 }
 
+// addEvent appends to the activity log and marks it for saving. The in-memory
+// list is bounded the same way the stored one is.
+func (e *env) addEvent(ev baseline.Event) {
+	e.events = append(e.events, ev)
+	if len(e.events) > baseline.MaxEvents {
+		e.events = e.events[len(e.events)-baseline.MaxEvents:]
+	}
+	e.eventsTotal++
+	e.eventsDirty = true
+}
+
+// webEvents converts the stored log into the dashboard's view of it.
+func webEvents(evs []baseline.Event) []web.Event {
+	out := make([]web.Event, 0, len(evs))
+	for _, ev := range evs {
+		out = append(out, web.Event{
+			When: ev.When, Kind: ev.Kind, Text: ev.Text,
+			Target: ev.Target, Device: ev.Device, Band: ev.Band,
+			Vectors: ev.Vectors, Hashes: ev.Hashes, Evidence: ev.Evidence,
+		})
+	}
+	return out
+}
+
+// raised is what was known about an alert at the moment it was raised.
+//
+// It is kept because the clear path runs when the findings are already gone
+// from the result: by then all that is left of an alert is the target string it
+// was filed under. Without this, an alert that resolves leaves behind a line
+// reading "Resolved: fe80::c0a8:1ff:fe24:9b31" - which names neither the
+// device nor what was seen, and is the whole reason this exists.
+type raised struct {
+	Label    string
+	Device   string
+	Band     string
+	Vectors  []string
+	Hashes   []string
+	Probes   []string
+	Evidence map[string]string
+}
+
 // recordEvents turns this cycle's result into activity-log entries by diffing
 // against the last cycle: an actionable target that is newly present is an
 // alert raised, one that has gone is an alert cleared. It also notes the
 // one-off transitions a watcher cares about - the learning window closing, and
-// the outside witness connecting or dropping. The log is bounded so it stays a
-// glance, and it lives only in memory: it is a convenience for the live page,
-// not a record (the log sink is the record).
+// the outside witness connecting or dropping.
+//
+// The log is the record. It is written to disk beside the profile, kept across
+// restarts, and carries the evidence with each entry, because the question
+// someone actually asks the next morning is not "did something happen" but
+// "what was it, and which machine".
 func (e *env) recordEvents(res verdict.Result) {
 	if e.alerted == nil {
-		e.alerted = map[string]bool{}
+		e.alerted = map[string]raised{}
 	}
 	now := time.Now()
-	add := func(kind, text string) {
-		e.events = append(e.events, web.Event{When: now, Kind: kind, Text: text})
-		if len(e.events) > 60 {
-			e.events = e.events[len(e.events)-60:]
-		}
-	}
 
-	// Only Low-band and above is "activity" - a routine Info finding is not
-	// something changed, the same bar the home alert list uses.
-	cur := map[string]string{}
+	// What is actionable, using the same bar the six cards use: Low and above,
+	// plus the Info-band vectors that mean "this check could not run". A card
+	// greying out to say a check has stopped, while the log beside it stays
+	// silent, is the page disagreeing with itself.
+	cur := map[string]raised{}
 	for _, a := range res.Alerts {
-		if a.Band < verdict.Low {
+		if !actionableAlert(a) {
 			continue
 		}
-		label := a.Target
-		if len(a.Findings) > 0 && a.Findings[0].Title != "" {
-			label = a.Findings[0].Title
+		cur[a.Target] = e.describe(a)
+	}
+
+	for t, r := range cur {
+		if _, was := e.alerted[t]; was {
+			continue
 		}
-		cur[a.Target] = label
+		e.addEvent(baseline.Event{
+			When: now, Kind: "alert", Text: r.Label,
+			Target: t, Device: r.Device, Band: r.Band,
+			Vectors: r.Vectors, Hashes: r.Hashes, Evidence: r.Evidence,
+		})
 	}
-	for t, label := range cur {
-		if !e.alerted[t] {
-			add("alert", label)
+
+	for t, r := range e.alerted {
+		if _, still := cur[t]; still {
+			continue
 		}
-	}
-	for t := range e.alerted {
-		if _, ok := cur[t]; !ok {
-			add("clear", "Resolved: "+t)
+		// A finding that vanished because its probe went blind has not been
+		// resolved. Capture dying mid-pass closes the frame channel, and a
+		// capture-fed probe reads that as an empty window - which looks exactly
+		// like a quiet network. Saying "resolved" there is the failure this
+		// project names as its most repeated: silence that looks like success.
+		kind, text := "clear", r.Label+" - resolved"
+		if e.blindFor(r.Probes) {
+			kind, text = "stale", "No longer being checked: "+r.Label
 		}
+		e.addEvent(baseline.Event{
+			When: now, Kind: kind, Text: text,
+			Target: t, Device: r.Device, Band: r.Band,
+			Vectors: r.Vectors, Hashes: r.Hashes, Evidence: r.Evidence,
+		})
 	}
-	e.alerted = map[string]bool{}
-	for t := range cur {
-		e.alerted[t] = true
+	e.alerted = cur
+
+	// Findings held back by the learning window or the accept list. They are
+	// true and merely suppressed, and the held list exists precisely so that
+	// suppression is visible - a detector that hides its own suppressions
+	// cannot be trusted about anything else.
+	if e.heldSeen == nil {
+		e.heldSeen = map[string]bool{}
 	}
+	held := map[string]bool{}
+	for _, a := range res.Held {
+		if !actionableAlert(a) {
+			continue
+		}
+		held[a.Target] = true
+		if e.heldSeen[a.Target] {
+			continue
+		}
+		r := e.describe(a)
+		why := a.Suppressed
+		if why == "" {
+			why = "held back"
+		}
+		e.addEvent(baseline.Event{
+			When: now, Kind: "held", Text: r.Label + " - " + why,
+			Target: a.Target, Device: r.Device, Band: r.Band,
+			Vectors: r.Vectors, Hashes: r.Hashes, Evidence: r.Evidence,
+		})
+	}
+	e.heldSeen = held
 
 	// Learning finished - only once, and only if we actually watched the window
 	// close (an already-learned profile that just restarted did not "finish"
@@ -388,7 +518,8 @@ func (e *env) recordEvents(res verdict.Result) {
 	if e.profile.Learning() {
 		e.sawLearning = true
 	} else if e.sawLearning && !e.learnedOnce {
-		add("system", "Finished learning this network - now watching for changes")
+		e.addEvent(baseline.Event{When: now, Kind: "system",
+			Text: "Finished learning this network - now watching for changes"})
 		e.learnedOnce = true
 	}
 
@@ -396,12 +527,75 @@ func (e *env) recordEvents(res verdict.Result) {
 	if e.link != nil {
 		up := e.witnessView().Available
 		if up != e.witnessUp {
+			text := "Outside witness link lost"
 			if up {
-				add("system", "Outside witness connected")
-			} else {
-				add("system", "Outside witness link lost")
+				text = "Outside witness connected"
 			}
+			e.addEvent(baseline.Event{When: now, Kind: "system", Text: text})
 			e.witnessUp = up
 		}
 	}
+}
+
+// actionableAlert is the shared bar for "this is activity": Low band and above,
+// or an Info-band finding that means a check could not run. A routine Info
+// finding - a certificate rotating - is not something that changed.
+func actionableAlert(a verdict.Alert) bool {
+	if a.Band >= verdict.Low {
+		return true
+	}
+	for _, f := range a.Findings {
+		if couldNotCheck[f.Vector] {
+			return true
+		}
+	}
+	return false
+}
+
+// describe flattens an alert into what the log needs to still make sense once
+// the alert itself is gone.
+func (e *env) describe(a verdict.Alert) raised {
+	r := raised{Band: a.Band.String(), Evidence: map[string]string{}}
+	seenProbe := map[string]bool{}
+	for _, f := range a.Findings {
+		if r.Label == "" && f.Title != "" {
+			r.Label = f.Title
+		}
+		r.Vectors = append(r.Vectors, f.Vector)
+		r.Hashes = append(r.Hashes, f.Hash())
+		if !seenProbe[f.Probe] {
+			seenProbe[f.Probe] = true
+			r.Probes = append(r.Probes, f.Probe)
+		}
+		// Copied, never aliased: the finding's map outlives this call inside
+		// e.recent, and a later cycle rewriting it would silently rewrite
+		// history.
+		for k, v := range f.Evidence {
+			if _, dup := r.Evidence[k]; !dup {
+				r.Evidence[k] = v
+			}
+		}
+	}
+	if r.Label == "" {
+		r.Label = "Something was found on " + a.Target
+	}
+	// Named after the evidence is gathered, so the hardware a probe reported can
+	// stand in when the target itself matches no address in the history - which
+	// is every link-local target, since the neighbour table is IPv4 only.
+	r.Device = e.deviceLabel(a.Target, r.Evidence["hardware"])
+	if len(r.Evidence) == 0 {
+		r.Evidence = nil
+	}
+	return r
+}
+
+// blindFor reports whether any probe behind an alert failed to observe this
+// pass, which is the difference between "it stopped" and "we stopped looking".
+func (e *env) blindFor(probes []string) bool {
+	for _, p := range probes {
+		if e.erroredThisPass[p] {
+			return true
+		}
+	}
+	return false
 }

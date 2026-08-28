@@ -25,7 +25,6 @@ import (
 	"github.com/sizzlorox/mitmwatch/internal/osq"
 	"github.com/sizzlorox/mitmwatch/internal/probe"
 	"github.com/sizzlorox/mitmwatch/internal/roots"
-	"github.com/sizzlorox/mitmwatch/internal/web"
 	"github.com/sizzlorox/mitmwatch/internal/witness"
 
 	// Probes register themselves.
@@ -147,7 +146,13 @@ type env struct {
 	// failure keeps the previous view instead of clearing it.
 	recent          map[string]recentFindings
 	erroredThisPass map[string]bool
-	link            *witness.Link
+	// observedThisPass is what each probe actually saw this cycle, adopted into
+	// the baseline or not. The device history reads it rather than the stored
+	// snapshot: the baseline refuses to adopt an observation that reports an
+	// unabsorbed change, so at exactly the moment an attacker appears the
+	// stored view is still the world as it was before.
+	observedThisPass map[string]probe.Snapshot
+	link             *witness.Link
 	// firstDeliver guards the cooldown Forget on the first cycle after start,
 	// when the in-memory finding union is empty and would otherwise clear
 	// cooldown state it has no basis to clear. Set true at construction.
@@ -156,8 +161,12 @@ type env struct {
 	// Dashboard read-model state, maintained across cycles by the sensor.
 	tier        string               // friendly capture-tier label ("the wire" / "device tables")
 	since       time.Time            // when this sensor process started, for uptime
-	events      []web.Event          // bounded activity log, oldest first
-	alerted     map[string]bool      // targets currently in an actionable alert, for raise/clear
+	lastCycle   time.Time            // when the last completed cycle stamped its sightings
+	events      []baseline.Event     // bounded activity log, oldest first, persisted
+	eventsTotal int                  // how many entries the log holds in all
+	eventsDirty bool                 // the log changed and needs writing
+	alerted     map[string]raised    // targets currently in an actionable alert, for raise/clear
+	heldSeen    map[string]bool      // targets currently held back, so each is logged once
 	sawLearning bool                 // observed the learning window while it was open
 	learnedOnce bool                 // emitted the "finished learning" event already
 	witnessUp   bool                 // last witness-link state, for connect/disconnect events
@@ -584,6 +593,7 @@ func cmdBaseline(ctx context.Context, args []string) error {
 			return err
 		}
 		fmt.Printf("reset profile %s - the next check relearns this network\n", e.profile.Key)
+		fmt.Println("  the device history in it is discarded; the activity log is kept")
 		return nil
 
 	case "accept":
@@ -643,22 +653,16 @@ func cmdProfiles(ctx context.Context, args []string) error {
 		if !baseline.ValidTrust(level) {
 			return fmt.Errorf("unknown trust level %q (want home, work, public or unknown)", level)
 		}
-		ps, err := e.store.List()
+		// Read-modify-write the stored file, not a copy handed out by List: a
+		// running sensor rewrites the same profile every couple of minutes, so
+		// saving a listing taken a moment ago rolls back everything learned
+		// since - the device history and the notification cooldowns with it.
+		p, err := e.store.SetTrust(key, level)
 		if err != nil {
 			return err
 		}
-		for _, p := range ps {
-			if p.Key != key {
-				continue
-			}
-			p.Trust = level
-			if err := e.store.Save(p); err != nil {
-				return err
-			}
-			fmt.Printf("profile %s (%s) is now trusted as %q\n", p.Key, p.Label, level)
-			return nil
-		}
-		return fmt.Errorf("no profile with key %q", key)
+		fmt.Printf("profile %s (%s) is now trusted as %q\n", p.Key, p.Label, level)
+		return nil
 	}
 	return fmt.Errorf("unknown subcommand %q", argAt(pos, 0))
 }

@@ -1,0 +1,80 @@
+{{define "activity.html"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Activity - mitmwatch</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b21;--edge:#262a33;--ink:#e8eaed;--dim:#9aa0aa;
+    --ok:#2ea043;--warn:#d29922;--bad:#f85149;--learn:#58a6ff}
+  @media (prefers-color-scheme: light){:root{--bg:#f6f7f9;--card:#fff;--edge:#e2e5ea;--ink:#1b1f24;--dim:#5b6472}}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);color:var(--ink);overflow-x:hidden}
+  .wrap{max-width:900px;margin:0 auto;padding:20px 16px 64px}
+  a{color:var(--learn)}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:18px}
+  .ev{background:var(--card);border:1px solid var(--edge);border-left:4px solid var(--dim);
+    border-radius:10px;padding:12px 14px;margin-bottom:10px}
+  .ev.k-alert{border-left-color:var(--bad)}
+  .ev.k-clear{border-left-color:var(--ok)}
+  .ev.k-stale{border-left-color:var(--warn)}
+  .ev.k-held{border-left-color:var(--warn)}
+  .ev.k-system{border-left-color:var(--learn)}
+  .ev .when{color:var(--dim);font-size:12px}
+  .ev .what{margin:2px 0 0;font-size:15px}
+  .ev .meta{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px}
+  .tag{font-size:11px;color:var(--dim);border:1px solid var(--edge);border-radius:999px;padding:1px 9px}
+  .tag b{color:var(--ink);font-weight:600}
+  details{margin-top:9px}
+  summary{cursor:pointer;color:var(--dim);font-size:13px}
+  .tablewrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+  td{padding:4px 10px 4px 0;border-top:1px solid var(--edge);vertical-align:top;word-break:break-word}
+  td.k{color:var(--dim);white-space:nowrap;width:1%}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+  .empty{color:var(--dim);padding:20px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p><a href="/">&larr; Back</a></p>
+  <h1>Activity on {{.Network}}</h1>
+  <div class="sub">
+    {{if .Events}}{{if gt .Total .Kept}}The newest {{.Kept}} of {{.Total}} entries recorded; older ones are not kept.
+    {{else}}{{.Total}} entr{{if eq .Total 1}}y{{else}}ies{{end}} recorded, newest first.{{end}}
+    Kept across restarts, and not erased by <span class="mono">baseline reset</span>.
+    {{else}}Nothing has been recorded on this network yet.{{end}}
+  </div>
+
+  {{if .Events}}
+  {{range .Events}}
+  <div class="ev k-{{.Kind}}">
+    <div class="when">{{at .When}} &middot; {{since .When}}</div>
+    <p class="what">{{.Text}}</p>
+    <div class="meta">
+      {{if .Device}}<span class="tag"><b>Device</b> {{.Device}}</span>{{end}}
+      {{if .Target}}<span class="tag"><b>Target</b> {{.Target}}</span>{{end}}
+      {{if .Band}}<span class="tag"><b>Severity</b> {{.Band}}</span>{{end}}
+      {{range .Vectors}}<span class="tag"><b>Check</b> {{.}}</span>{{end}}
+      {{range .Hashes}}<span class="tag mono">{{.}}</span>{{end}}
+    </div>
+    {{if .Evidence}}
+    <details>
+      <summary>What was seen</summary>
+      <div class="tablewrap">
+      <table>
+        {{range $k, $v := .Evidence}}<tr><td class="k">{{$k}}</td><td>{{$v}}</td></tr>{{end}}
+      </table>
+      </div>
+    </details>
+    {{end}}
+  </div>
+  {{end}}
+  {{else}}
+  <div class="empty">The sensor records what it finds here as it happens.</div>
+  {{end}}
+</div>
+</body>
+</html>{{end}}

@@ -60,6 +60,11 @@ type Profile struct {
 	// process does is not one: the sensor restarts on every upgrade, and a
 	// crash loop would become a notification loop.
 	Notified map[string]time.Time `json:"notified,omitempty"`
+
+	// Devices is the history of hardware seen on this network, keyed by MAC.
+	// A record for people to read; nothing in detection may consult it. See
+	// devices.go.
+	Devices map[string]Device `json:"devices,omitempty"`
 }
 
 // Learning reports whether the profile is still inside its learning window,
@@ -144,6 +149,7 @@ func (s *Store) Load(n osq.NetworkIdentity, learnWindow time.Duration) (*Profile
 			Snapshots:  map[string]probe.Snapshot{},
 			Accepted:   map[string]Accept{},
 			Notified:   map[string]time.Time{},
+			Devices:    map[string]Device{},
 		}
 		return p, true, nil
 	}
@@ -154,18 +160,61 @@ func (s *Store) Load(n osq.NetworkIdentity, learnWindow time.Duration) (*Profile
 	if err := json.Unmarshal(b, &p); err != nil {
 		return nil, false, fmt.Errorf("baseline %s: %w", key, err)
 	}
-	if p.Snapshots == nil {
-		p.Snapshots = map[string]probe.Snapshot{}
-	}
-	if p.Accepted == nil {
-		p.Accepted = map[string]Accept{}
-	}
+	p.fillMaps()
 	// The network identity can gain fields (a resolver list arriving late)
 	// without changing the key; keep the freshest view.
 	p.Network = n
 	p.Label = n.Label()
 	p.LastSeen = time.Now().UTC()
 	return &p, false, nil
+}
+
+// fillMaps replaces the nil maps a profile written by an older version - or one
+// whose JSON simply omitted them - decodes with.
+//
+// A nil map in Go reads perfectly well and panics on the first write. The sensor
+// restarts on failure, so one such panic is a crash loop, and the profile is
+// touched on every cycle. Every map on Profile is guarded here, in one place,
+// so adding another cannot forget.
+func (p *Profile) fillMaps() {
+	if p.Snapshots == nil {
+		p.Snapshots = map[string]probe.Snapshot{}
+	}
+	if p.Accepted == nil {
+		p.Accepted = map[string]Accept{}
+	}
+	if p.Notified == nil {
+		p.Notified = map[string]time.Time{}
+	}
+	if p.Devices == nil {
+		p.Devices = map[string]Device{}
+	}
+}
+
+// SetTrust records a trust level on one stored profile.
+//
+// Read, modify, write - never a copy handed out by List. The sensor rewrites the
+// same file every couple of minutes, so saving a listing taken seconds earlier
+// silently reverts everything learned since: the device history most visibly,
+// but the cooldown state and the learned snapshots with it.
+func (s *Store) SetTrust(key, trust string) (*Profile, error) {
+	b, err := os.ReadFile(s.file(key))
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("no profile with key %q", key)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("baseline: %w", err)
+	}
+	var p Profile
+	if err := json.Unmarshal(b, &p); err != nil {
+		return nil, fmt.Errorf("baseline %s: %w", key, err)
+	}
+	p.fillMaps()
+	p.Trust = trust
+	if err := s.Save(&p); err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // Save writes the profile atomically: a crash mid-write must not leave a
@@ -175,6 +224,12 @@ func (s *Store) Save(p *Profile) error {
 	if err != nil {
 		return fmt.Errorf("baseline: %w", err)
 	}
+	return s.writeFile(s.file(p.Key), b)
+}
+
+// writeFile is the atomic write both the profile and the activity log use:
+// temp file, flushed, mode-restricted, then renamed over the target.
+func (s *Store) writeFile(path string, b []byte) error {
 	tmp, err := os.CreateTemp(s.dir, ".tmp-*")
 	if err != nil {
 		return fmt.Errorf("baseline: %w", err)
@@ -195,7 +250,7 @@ func (s *Store) Save(p *Profile) error {
 	if err := os.Chmod(name, 0o600); err != nil {
 		return fmt.Errorf("baseline: %w", err)
 	}
-	if err := os.Rename(name, s.file(p.Key)); err != nil {
+	if err := os.Rename(name, path); err != nil {
 		return fmt.Errorf("baseline: %w", err)
 	}
 	return nil
@@ -220,6 +275,7 @@ func (s *Store) List() ([]*Profile, error) {
 		if err := json.Unmarshal(b, &p); err != nil {
 			continue
 		}
+		p.fillMaps()
 		out = append(out, &p)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen.After(out[j].LastSeen) })
@@ -227,6 +283,11 @@ func (s *Store) List() ([]*Profile, error) {
 }
 
 // Reset deletes a profile so the next run relearns it from scratch.
+//
+// The activity log beside it is deliberately kept. Relearning what is normal on
+// a network is not a reason to erase the record of what has happened on it, and
+// a reset that quietly destroyed that record would be the easiest way to hide
+// an incident from whoever looks next.
 func (s *Store) Reset(key string) error {
 	err := os.Remove(s.file(key))
 	if os.IsNotExist(err) {

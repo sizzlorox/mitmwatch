@@ -18,6 +18,12 @@
   tr:last-child td{border-bottom:none}
   .mac{color:var(--dim);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
   .empty{color:var(--dim);padding:20px}
+  .tablewrap{overflow-x:auto}
+  tr.gone td{opacity:.55}
+  .now{color:#2ea043}
+  .note{font-size:10px;color:var(--dim);border:1px solid var(--edge);border-radius:999px;
+    padding:0 6px;margin-left:6px;white-space:nowrap}
+  .foot{color:var(--dim);font-size:12px;margin-top:16px}
 </style>
 </head>
 <body>
@@ -25,17 +31,25 @@
   <p><a href="/">&larr; Back</a></p>
   <h1>Devices on {{.Network}}</h1>
   {{if .Devices}}
+  <div class="tablewrap">
   <table>
-    <tr><th>Address</th><th>Hardware</th><th>Name</th><th>First seen</th></tr>
+    <tr><th>Address</th><th>Hardware</th><th>Name</th><th>First seen at this address</th><th>Last seen</th></tr>
     {{range .Devices}}
-    <tr>
+    <tr{{if not .Present}} class="gone"{{end}}>
       <td>{{.IP}}</td>
-      <td class="mac">{{.MAC}}</td>
+      <td class="mac">{{.MAC}}{{if .Random}}<span class="note">randomised</span>{{end}}</td>
       <td>{{if .Name}}{{.Name}}{{else}}&mdash;{{end}}</td>
-      <td>{{.First.Format "Jan 2 15:04"}}</td>
+      <td>{{clock .FirstSeen}}</td>
+      <td>{{if .Present}}<span class="now">connected now</span>{{else}}{{clock .LastSeen}}{{end}}</td>
     </tr>
     {{end}}
   </table>
+  </div>
+  <p class="foot">Devices are remembered by hardware address, so one that is switched off
+  still appears with the last time it was seen. A phone that rotates its address
+  (marked <em>randomised</em>) is recorded once per address, not once per device.
+  This host reads IPv4 neighbours only: a device that stays active over IPv6
+  alone will read as gone.</p>
   {{else}}
   <p class="empty">No devices recorded yet. The sensor lists hosts it has seen on the network.</p>
   {{end}}

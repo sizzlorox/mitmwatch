@@ -97,7 +97,7 @@ func TestDevicesPageEscapesNames(t *testing.T) {
 	s := NewState()
 	s.Update(Update{
 		Network: "home", When: time.Now(),
-		Devices: []Device{{IP: "10.0.4.5", MAC: "aa:bb", Name: "<b>x</b>", First: time.Now()}},
+		Devices: []Device{{IP: "10.0.4.5", MAC: "aa:bb", Name: "<b>x</b>", FirstSeen: time.Now()}},
 	})
 	_, body, _ := get(t, Handler(s), "/devices")
 	if strings.Contains(body, "<b>x</b>") {
@@ -151,9 +151,26 @@ func TestInfoBandFindingDoesNotAlarm(t *testing.T) {
 			}},
 		}},
 	})
+	// The activity log renders one entry per event with its kind as a class, and
+	// an alert-kind entry is exactly what a page in this state carries: an
+	// earlier alert that has since cleared. It must not collide with the
+	// assertion below, which guards a real past false alarm - github rotates its
+	// leaf constantly and the page went amber over it.
+	s.Update(Update{
+		Network: "home", When: time.Now(),
+		Alerts: []verdict.Alert{{
+			Target: "github.com", Band: verdict.Info, Score: 5,
+			Findings: []probe.Finding{{
+				Probe: "tls", Vector: "tls/leaf-rotated", Score: 5,
+				Title: "The certificate for github.com changed, from the same issuer",
+			}},
+		}},
+		Events: []Event{{When: time.Now(), Kind: "alert", Text: "an earlier alert, since cleared"}},
+	})
+
 	_, body, _ := get(t, Handler(s), "/")
 	if strings.Contains(body, "Something looks unusual") || strings.Contains(body, "Something needs your attention") {
-		t.Errorf("an Info-band leaf rotation put the headline into attention:\n%s", body[:600])
+		t.Errorf("an Info-band leaf rotation put the headline into attention:\n%s", head(body, 600))
 	}
 	if !strings.Contains(body, "All clear") {
 		t.Error("headline should be All clear over a routine Info finding")
@@ -161,4 +178,14 @@ func TestInfoBandFindingDoesNotAlarm(t *testing.T) {
 	if strings.Contains(body, "class=\"alert\"") {
 		t.Error("an Info-band finding was listed under needs-your-attention")
 	}
+	if !strings.Contains(body, "log-alert") {
+		t.Error("the activity entry vanished; the log must still record what happened when the headline is calm")
+	}
+}
+
+func head(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
