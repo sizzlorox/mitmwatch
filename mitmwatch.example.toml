@@ -75,6 +75,17 @@ hosts = ["github.com", "en.wikipedia.org", "www.cloudflare.com"]
 # a service-discovery bridge that legitimately answers broadly.
 #answer_threshold = 5
 
+# Every browser publishes a random <uuid>.local name over mDNS for each address
+# it can be reached on, once per connection a web page opens, so that the page
+# cannot learn this machine's address on your network (RFC 8828). A desktop with
+# tabs open publishes a handful, discards them and publishes a fresh set, which
+# to a rule that counts names looks like one host claiming to be five things.
+# Those names are not counted: a name nobody asked for cannot capture anyone,
+# and poisoning works by answering the question a victim actually asked. Set
+# this to false to count them anyway. When the exclusion changes an outcome it
+# is reported as an info-band finding either way.
+#ignore_browser_candidates = true
+
 [clock]
 ntp = ["pool.ntp.org", "time.cloudflare.com"]
 

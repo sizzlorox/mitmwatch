@@ -41,6 +41,21 @@ activity to hand:
 
 ![mitmwatch dashboard in its all-clear state — a green banner, six green area cards, and the devices and activity panels](docs/dashboard-clear.png)
 
+Devices are remembered by hardware address, so one that is switched off stays on
+the list with the time it was last seen rather than silently disappearing, and
+each row carries its own first-seen date. A device that rotates its address —
+most phones do — is marked, because the history is then of the address and not
+of the device.
+
+The activity log is a record, not a scrollback. It is written to disk beside the
+profile, survives restarts, is not erased by `baseline reset`, and each entry
+keeps the evidence behind it. That matters most for an alert that has since
+cleared: the card goes green and the alert disappears, and the entry is all
+that is left. `/activity` shows the log in full, with what was seen and which
+device it was:
+
+![the mitmwatch activity page — each entry timestamped, naming the device, the severity and the check that fired, with the evidence behind it expandable](docs/activity.png)
+
 Open it from any device on the network at `http://<sensor-ip>:8080` (set the
 address with `dashboard` under `[sensor]` in the config).
 
@@ -114,7 +129,7 @@ apart from an attack. That needs several witnesses in agreement — future work.
 
 | Probe | Catches |
 |---|---|
-| `nameres` | A device answering LLMNR/NBT-NS/mDNS for names that are not its own - the signature of Responder and similar credential-theft tools |
+| `nameres` | A device answering LLMNR/NBT-NS/mDNS for names that are not its own - the signature of Responder and similar credential-theft tools. The evidence separates names somebody asked for from names that were merely announced, because a tool answers questions |
 | `dhcp` | A device offering a gateway, resolver, or proxy configuration that is not this network's - a man-in-the-middle that forges nothing |
 | `arp` | Something else answering for your router - the classic same-segment attack. From the wire: two devices claiming one address, live. From the neighbour table: a gateway whose hardware changed, or one device holding both the router's address and its own |
 | `nd` | A new device advertising itself as your IPv6 router, or an existing one changing the DNS server it hands out - the SLAAC man-in-the-middle, which needs no ARP because hosts prefer IPv6 |
@@ -128,6 +143,27 @@ Findings carry a score; scores add up per target; bands decide whether anyone
 is interrupted (info < 20, low 20, medium 40, high 60, critical 80). Every
 weight is in the config file, because they are guesses until the lab and soak
 phases say otherwise.
+
+One deliberate exclusion, and the reasoning for it, since a detector that
+quietly ignores things is not one. Every browser publishes a random
+`<uuid>.local` name over mDNS for each address it can be reached on, once per
+connection a web page opens — RFC 8828, so that a site cannot learn the
+machine's address on your network. A desktop with tabs open publishes a handful,
+discards them and publishes a fresh set, which to a rule that counts names looks
+exactly like a host claiming to be five things at once. Measured on a live home
+network: two machines produced 26 of these in fifteen minutes, and every genuine
+service name on the same wire was being queried by somebody while not one of the
+26 ever was.
+
+`nameres` therefore does not count a name that is a canonical UUID, ends in
+`.local`, arrived over mDNS, **and** was asked for by nobody. All four, because
+each one is a way for a real claim to be mistaken for a placeholder. This does
+not blind the rule: name poisoning works by answering the question a victim
+asked — `wpad`, a file server, a NetBIOS name — so that the victim connects and
+authenticates, and nothing ever asks for a random UUID it was not already given
+out of band. When the exclusion changes an outcome it is reported as an
+info-band finding rather than left to be inferred from silence, and
+`ignore_browser_candidates = false` under `[nameres]` turns it off.
 
 ## What it does not do
 

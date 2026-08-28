@@ -122,6 +122,11 @@ type Nameres struct {
 	// window before it stops looking like a device and starts looking like a
 	// tool. Zero uses the built-in default.
 	AnswerThreshold int `toml:"answer_threshold"`
+
+	// IgnoreBrowserCandidates excludes RFC 8828 WebRTC placeholder names from
+	// the answer count. Default on; set false to count them. A pointer so an
+	// unset field is the default rather than false.
+	IgnoreBrowserCandidates *bool `toml:"ignore_browser_candidates"`
 }
 
 type DNS struct {
@@ -256,6 +261,15 @@ func DefaultWeights() map[string]int {
 		"clock/drift-major": 50,
 		"clock/drift-minor": 30,
 	}
+}
+
+// NameresIgnoreBrowserCandidates reports whether the WebRTC placeholder names a
+// browser publishes are kept out of the answer count. On unless turned off.
+func (c *Config) NameresIgnoreBrowserCandidates() bool {
+	if c == nil || c.Nameres.IgnoreBrowserCandidates == nil {
+		return true
+	}
+	return *c.Nameres.IgnoreBrowserCandidates
 }
 
 // NameresThreshold is the configured answer threshold, or 0 for the default.

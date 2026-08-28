@@ -44,6 +44,71 @@ func ParseNameAnswers(port uint16, payload []byte) []NameAnswer {
 	return nil
 }
 
+// ParseNameQuestions extracts the names a query asks about.
+//
+// Queries say nothing about who owns a name, which is why they are not answers
+// and never counted as claims. They matter for the opposite reason: they are
+// the record of what anybody on the segment actually wanted resolved. A
+// poisoning tool exists to answer those questions, so a name that was answered
+// and never asked is a different thing from a name that was answered because
+// somebody asked - and only the wire can tell them apart.
+func ParseNameQuestions(port uint16, payload []byte) []string {
+	switch port {
+	case MDNSPort, LLMNRPort:
+		return parseDNSQuestions(payload)
+	case NBNSPort:
+		return parseNBNSQuestions(payload)
+	}
+	return nil
+}
+
+func parseDNSQuestions(payload []byte) []string {
+	var p dnsmessage.Parser
+	h, err := p.Start(payload)
+	if err != nil || h.Response {
+		return nil
+	}
+	var out []string
+	for {
+		q, err := p.Question()
+		if err != nil {
+			return out // includes ErrSectionDone
+		}
+		if n := strings.TrimSuffix(q.Name.String(), "."); n != "" {
+			out = append(out, n)
+		}
+	}
+}
+
+// parseNBNSQuestions reads the question section of an NBT-NS query, which uses
+// the same first-level name encoding as its answers.
+func parseNBNSQuestions(b []byte) []string {
+	if len(b) < nbnsHeaderLen {
+		return nil
+	}
+	if binary.BigEndian.Uint16(b[2:4])&0x8000 != 0 {
+		return nil // a response, not a query
+	}
+	questions := int(binary.BigEndian.Uint16(b[4:6]))
+	i := nbnsHeaderLen
+	var out []string
+	for q := 0; q < questions; q++ {
+		if i >= len(b) {
+			return out
+		}
+		l := int(b[i])
+		if l != nbnsEncodedLen || i+1+l+1 > len(b) {
+			return out
+		}
+		if n := decodeNBNSName(b[i+1 : i+1+l]); n != "" {
+			out = append(out, n)
+		}
+		// name, terminating zero, then type(2) and class(2).
+		i += 1 + l + 1 + 4
+	}
+	return out
+}
+
 // parseDNSAnswers handles mDNS and LLMNR, which both use the DNS wire format.
 //
 // The parsing is delegated to x/net/dns/dnsmessage rather than hand-rolled.
