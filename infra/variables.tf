@@ -65,7 +65,27 @@ variable "witness_port_open" {
 }
 
 variable "witness_allow_cidrs" {
-  description = "Which addresses may dial the witness port. Should be the sensor's public address, not the internet."
+  description = <<-EOT
+    Which addresses may dial the witness port. Not the internet, and in practice not a single
+    /32 either.
+
+    A /32 is the tightest rule and it is the one that breaks: a residential line's address is
+    rotated by the ISP, and when it moves the sensor is locked out of its own witness until a
+    human notices. That happened here and cost 31 hours of the detector running with no outside
+    opinion. Every automatic repair for it costs something worse - an open port, a cloud
+    credential on the sensor, or a third party in the recovery path.
+
+    So allowlist the ISP allocations the line actually draws from. It is a much larger set than
+    one address and a much smaller one than the internet, it never goes stale, and it has no
+    moving parts to fail. The firewall was only ever defence-in-depth: the witness authenticates
+    by pinned mutual TLS with no CA, and that is unaffected either way.
+
+    Find yours from the sensor, and include every allocation it has been seen in:
+      whois "$(curl -s https://api.ipify.org)" | grep -iE '^(inetnum|netname)'
+
+    Set it in infra/.env, which is gitignored - a public repo should not carry a map of which
+    netblock its author's sensor lives in.
+  EOT
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
