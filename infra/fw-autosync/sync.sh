@@ -17,11 +17,31 @@ FIREWALL_ID="${FWSYNC_FIREWALL_ID:-}"                   # numeric Linode firewal
 RULE_LABEL="${FWSYNC_RULE_LABEL:-allow-sensor}"         # the inbound rule to move
 MAX_AGE="${FWSYNC_MAX_AGE:-600}"                        # seconds a statement stays valid
 
-# --- rendezvous (pluggable) - mirror of publish.sh --------------------------
+# --- rendezvous: DuckDNS - mirror of publish.sh -----------------------------
+# Read the statement out of a TXT record. See publish.sh for why DuckDNS, and
+# why the channel does not have to be trusted: everything below this line treats
+# the answer as hostile until the signature verifies.
+#
+# Only the TXT record is read. DuckDNS also holds an A record for the same name
+# and using it would be the whole bug - the firewall must move only to an
+# address this witness can verify a signature over.
+DUCK_DOMAIN="${FWSYNC_DUCKDNS_DOMAIN:-}"      # label only, no .duckdns.org
+
 rendezvous_get() {
-  # Print the signed statement (one line) to stdout.
-  echo "rendezvous_get not implemented - see README" >&2
-  return 1
+  [[ -n $DUCK_DOMAIN ]] || die "set FWSYNC_DUCKDNS_DOMAIN"
+  local raw
+  raw=$(dig +short +time=5 +tries=2 TXT "${DUCK_DOMAIN}.duckdns.org" 2>/dev/null) || return 1
+  [[ -n $raw ]] || return 1
+
+  # dig prints each TXT record on its own line, quoted, and splits a string
+  # longer than 255 bytes into several quoted chunks separated by a space on
+  # that line. Take the first record, rejoin the chunks, and drop the enclosing
+  # quotes - but nothing else. The statement's own single spaces are structural
+  # ("ip ts nonce"), so a blanket whitespace strip would corrupt the message and
+  # surface as a signature failure, which reads like tampering rather than a
+  # parsing bug. A statement is ~150 bytes and should never be split; handling
+  # it anyway costs one substitution.
+  head -n1 <<<"$raw" | sed -e 's/" "//g' -e 's/^"//' -e 's/"$//' | tr -d '\n'
 }
 
 die() { echo "fw-sync: $*" >&2; exit 1; }
@@ -37,6 +57,19 @@ verify() {
 }
 
 sane_ip() { [[ $1 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && [[ $1 != 10.* && $1 != 192.168.* && $1 != 127.* && $1 != 169.254.* ]]; }
+
+# spend records a nonce as used, and keeps the file bounded.
+#
+# A nonce is only ever useful inside MAX_AGE, so remembering the last few
+# hundred is far more history than the replay guard can need - and an
+# append-only file on a small VPS that grows every two minutes forever is a
+# slow-motion disk-full bug in the component whose whole job is to still be
+# working months from now.
+spend() {
+  echo "$1" >> "$SEEN"
+  local keep; keep=$(tail -n 500 "$SEEN")
+  printf '%s\n' "$keep" > "$SEEN"
+}
 
 main() {
   [[ -n $FIREWALL_ID ]] || die "set FWSYNC_FIREWALL_ID"
@@ -62,7 +95,7 @@ main() {
   local api="https://api.linode.com/v4/networking/firewalls/$FIREWALL_ID/rules"
   local rules; rules=$(curl -fsS -m 15 -H "Authorization: Bearer $token" "$api") || die "API read failed"
   if grep -q "\"$ip/32\"" <<<"$rules"; then
-    echo "$nonce" >> "$SEEN"; echo "firewall already at $ip/32"; exit 0
+    spend "$nonce"; echo "firewall already at $ip/32"; exit 0
   fi
 
   # Rewrite the sensor rule's address to the new /32 and PUT it back. python3
@@ -82,7 +115,10 @@ PY
 
   curl -fsS -m 15 -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
     -d "$updated" "$api" >/dev/null || die "API write failed"
-  echo "$nonce" >> "$SEEN"
+  spend "$nonce"
   echo "firewall moved to $ip/32"
 }
-main "$@"
+
+# Run only when executed, not when sourced, so the self-test can exercise the
+# functions above without reaching for DuckDNS or the Linode API.
+if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then main "$@"; fi

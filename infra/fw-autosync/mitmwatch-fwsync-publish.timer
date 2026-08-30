@@ -1,0 +1,16 @@
+[Unit]
+Description=mitmwatch fw-autosync: publish the sensor's signed public IP, periodically
+Documentation=https://github.com/sizzlorox/mitmwatch/blob/main/infra/fw-autosync/README.md
+
+[Timer]
+# Every two minutes, comfortably inside the witness's 600s expiry and inside
+# publish.sh's own 180s refresh window. The script exits immediately when the
+# address has not moved and the last statement is still fresh, so most of these
+# ticks cost one HTTP request to an IP-echo service and nothing else.
+OnBootSec=30s
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

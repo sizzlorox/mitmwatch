@@ -1,0 +1,32 @@
+[Unit]
+Description=mitmwatch fw-autosync: publish this sensor's signed public IP
+Documentation=https://github.com/sizzlorox/mitmwatch/blob/main/infra/fw-autosync/README.md
+# Publishing needs the network and a working resolver; without them the script
+# exits non-zero and the timer simply tries again.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/mitmwatch/fwsync.env
+ExecStart=/usr/local/bin/fwsync-publish
+
+# The signing key and the DuckDNS token are root-only, so this runs as root and
+# gives up everything else. It reads two files, writes one state file and makes
+# one outbound HTTPS request.
+User=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/mitmwatch

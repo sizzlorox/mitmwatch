@@ -1,0 +1,30 @@
+[Unit]
+Description=mitmwatch fw-autosync: verify the sensor's signed IP and update the firewall
+Documentation=https://github.com/sizzlorox/mitmwatch/blob/main/infra/fw-autosync/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/mitmwatch/fwsync.env
+ExecStart=/usr/local/bin/fwsync-sync
+
+# This is the side that holds the Linode token, so it is the side worth
+# confining. It reads the sensor's public key and the token, appends to the
+# spent-nonce file, and talks to one API over HTTPS.
+User=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/mitmwatch

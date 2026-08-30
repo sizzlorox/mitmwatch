@@ -34,9 +34,49 @@ addresses live on the two boxes, never in git.
 ## Layout
 
 ```
-publish.sh   runs on the SENSOR: sign the current public IP, publish it
+publish.sh   runs on the SENSOR:  sign the current public IP, publish it
 sync.sh      runs on the WITNESS: verify it, update the Linode firewall /32
+selftest.sh  runs anywhere:       the whole round trip, offline
+*.service/*.timer                 systemd units for both sides
 ```
+
+## The rendezvous is DuckDNS
+
+The statement travels in a **TXT record on a free DuckDNS hostname**. The sensor
+writes it; the witness reads it with one `dig`.
+
+DuckDNS was chosen over a real DNS provider for one reason: the credential. A
+Cloudflare token can edit a zone, a Linode token can edit every domain on the
+account. A DuckDNS token updates exactly one hostname and can do nothing else —
+and since the entire premise is that stealing the sensor must not hand anyone a
+way to move the witness's firewall, the narrowest credential wins. This one is
+narrow enough to be uninteresting.
+
+The channel is still not trusted. DuckDNS could serve anything and the witness
+would reject it, because only the ed25519 signature is believed. What DuckDNS
+*can* do is withhold or replay a statement — denial of service, not
+redirection — and a withheld statement fails closed, leaving the firewall where
+it is. Only the TXT record is read; the A record on the same name is ignored on
+purpose, because acting on an unauthenticated lookup is the one mistake that
+would undo all of this.
+
+Run `./selftest.sh` to see it: 23 checks covering the signature, a statement
+signed by the wrong key, TXT quoting and chunk-splitting, staleness in both
+directions, and the replay guard. It touches neither DuckDNS nor Linode.
+
+### Why the sensor republishes on a timer, not only on change
+
+A statement expires — `sync.sh` refuses anything older than `MAX_AGE` (600s).
+If the sensor published only when its address moved, a witness that was down,
+rebooting or simply not polling during that one window would never see a valid
+statement again, and the firewall would stay pinned to an address that no longer
+exists.
+
+That is not hypothetical. It is exactly how this deployment locked itself out:
+the address rotated at 04:32, and by the time anyone looked the only statement
+that had ever been published was long expired. `publish.sh` now republishes
+whenever the last statement is older than `FWSYNC_REFRESH` (180s), whether or
+not anything changed.
 
 ## One-time setup
 
@@ -59,21 +99,52 @@ sync.sh      runs on the WITNESS: verify it, update the Linode firewall /32
    (`FIREWALL_ID`, `RULE_LABEL`). `curl -H "Authorization: Bearer $T"
    https://api.linode.com/v4/networking/firewalls` lists them.
 
-4. **Rendezvous**: implement `rendezvous_put` (sensor) and `rendezvous_get`
-   (witness) for your provider. The default stubs use a Linode DNS `TXT` record
-   via the Linode API — swap in your DNS host, an object store, or a gist. The
-   signature is what makes the channel safe, so the store only has to be
-   reachable, not trusted.
-
-5. **Schedule**: a systemd timer on each box.
+4. **DuckDNS**: sign in at [duckdns.org](https://www.duckdns.org) (it wants
+   nothing but an OAuth login), create one subdomain, and copy the token. On the
+   **sensor** only:
 
    ```
-   # sensor: publish every 2 min (cheap; only writes when the IP changed)
-   # witness: sync every 2 min
-   [Unit]  Description=fw-autosync
-   [Service] Type=oneshot ; ExecStart=/usr/local/bin/fw-%i.sh
-   [Timer] OnBootSec=30 ; OnUnitActiveSec=120 ; [Install] WantedBy=timers.target
+   sudo install -m 600 /dev/null /etc/mitmwatch/duckdns.token
+   sudo tee /etc/mitmwatch/duckdns.token >/dev/null      # paste the token, Ctrl-D
    ```
+
+   The token is worth nothing to an attacker: it moves one DNS record that the
+   witness does not trust anyway.
+
+5. **Environment**, `/etc/mitmwatch/fwsync.env` on both boxes — the units read
+   it. Use the same subdomain on each:
+
+   ```
+   # sensor
+   FWSYNC_DUCKDNS_DOMAIN=your-subdomain
+
+   # witness
+   FWSYNC_DUCKDNS_DOMAIN=your-subdomain
+   FWSYNC_FIREWALL_ID=1234567          # from step 3
+   FWSYNC_RULE_LABEL=allow-sensor
+   ```
+
+6. **Install and schedule**:
+
+   ```
+   # sensor
+   sudo install -m 755 publish.sh /usr/local/bin/fwsync-publish
+   sudo install -m 644 mitmwatch-fwsync-publish.{service,timer} /etc/systemd/system/
+   sudo systemctl daemon-reload && sudo systemctl enable --now mitmwatch-fwsync-publish.timer
+
+   # witness
+   sudo install -m 755 sync.sh /usr/local/bin/fwsync-sync
+   sudo install -m 644 mitmwatch-fwsync-sync.{service,timer} /etc/systemd/system/
+   sudo systemctl daemon-reload && sudo systemctl enable --now mitmwatch-fwsync-sync.timer
+   ```
+
+   Check either side with `systemctl status mitmwatch-fwsync-*.service` or
+   `journalctl -u mitmwatch-fwsync-sync`. The witness logs `firewall already at
+   <ip>/32` on a quiet tick and `firewall moved to <ip>/32` when it acts.
+
+   The witness's `dig` comes from `dnsutils` (`bind-utils` on RPM); install it
+   if `rendezvous_get` reports the rendezvous unreachable on an otherwise
+   healthy box.
 
 ## Bootstrap
 

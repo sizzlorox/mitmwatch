@@ -1,0 +1,19 @@
+[Unit]
+Description=mitmwatch fw-autosync: move the witness firewall to the sensor's proven address
+Documentation=https://github.com/sizzlorox/mitmwatch/blob/main/infra/fw-autosync/README.md
+
+[Timer]
+# Every two minutes. The interval has to stay well inside sync.sh's MAX_AGE
+# (600s): a statement older than that is refused, so a witness that polled more
+# slowly than the sensor republishes could never catch a valid one - which is
+# the lockout this whole mechanism exists to prevent.
+#
+# Most ticks are one DNS lookup that resolves to the address already in the
+# rule, and exit. The Linode API is called only when the address actually moved.
+OnBootSec=45s
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
