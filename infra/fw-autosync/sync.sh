@@ -14,7 +14,14 @@ PUB="${FWSYNC_PUB:-/etc/mitmwatch/fwsync.pub}"          # sensor's ed25519 publi
 TOKEN_FILE="${FWSYNC_TOKEN:-/etc/mitmwatch/linode-fw.token}"  # firewalls:read_write, root-only
 SEEN="${FWSYNC_SEEN:-/var/lib/mitmwatch/fwsync.seen}"   # spent nonces (anti-replay)
 FIREWALL_ID="${FWSYNC_FIREWALL_ID:-}"                   # numeric Linode firewall id
-RULE_LABEL="${FWSYNC_RULE_LABEL:-allow-sensor}"         # the inbound rule to move
+# Every inbound rule that should follow the sensor's address, space separated.
+#
+# Plural on purpose. This deployment pins two rules to the sensor - "ssh" and
+# "witness-mtls" - and moving only one is its own lockout: the witness link
+# comes back while SSH stays pinned to an address that no longer exists, so the
+# next time anything needs a shell there is no way in but the serial console.
+# FWSYNC_RULE_LABEL (singular) is still honoured for older configs.
+RULE_LABELS="${FWSYNC_RULE_LABELS:-${FWSYNC_RULE_LABEL:-ssh witness-mtls}}"
 MAX_AGE="${FWSYNC_MAX_AGE:-600}"                        # seconds a statement stays valid
 
 # --- rendezvous: DuckDNS - mirror of publish.sh -----------------------------
@@ -91,32 +98,46 @@ main() {
   touch "$SEEN"
   grep -qxF "$nonce" "$SEEN" && { echo "already applied"; exit 0; }
 
-  # Read the current rule; skip if the /32 already matches.
+  # Read the current ruleset.
   local api="https://api.linode.com/v4/networking/firewalls/$FIREWALL_ID/rules"
   local rules; rules=$(curl -fsS -m 15 -H "Authorization: Bearer $token" "$api") || die "API read failed"
-  if grep -q "\"$ip/32\"" <<<"$rules"; then
-    spend "$nonce"; echo "firewall already at $ip/32"; exit 0
-  fi
 
-  # Rewrite the sensor rule's address to the new /32 and PUT it back. python3
-  # does the JSON surgery so a stray sed cannot corrupt the ruleset.
+  # Rewrite every named rule's address to the new /32 and PUT it back. python3
+  # does the JSON surgery so a stray sed cannot corrupt the ruleset, and it
+  # reports whether anything actually needed changing - a substring grep for the
+  # address would say "already there" when only one of the two rules had moved.
   local updated
-  updated=$(RULE_LABEL="$RULE_LABEL" NEW_IP="$ip" python3 - "$rules" <<'PY'
-import json,os,sys
-r=json.loads(sys.argv[1]); lbl=os.environ["RULE_LABEL"]; ip=os.environ["NEW_IP"]
-hit=False
-for rule in r.get("inbound",[]):
-    if rule.get("label")==lbl:
-        rule.setdefault("addresses",{})["ipv4"]=[f"{ip}/32"]; hit=True
-if not hit: sys.exit("rule not found: "+lbl)
+  updated=$(RULE_LABELS="$RULE_LABELS" NEW_IP="$ip" python3 - "$rules" <<'PY'
+import json, os, sys
+r = json.loads(sys.argv[1])
+want = os.environ["RULE_LABELS"].split()
+ip = os.environ["NEW_IP"]
+seen, changed = set(), False
+for rule in r.get("inbound", []):
+    if rule.get("label") in want:
+        seen.add(rule["label"])
+        addrs = rule.setdefault("addresses", {})
+        if addrs.get("ipv4") != [f"{ip}/32"]:
+            addrs["ipv4"] = [f"{ip}/32"]
+            changed = True
+missing = [l for l in want if l not in seen]
+if missing:
+    sys.exit("rule(s) not found: " + " ".join(missing))
+print("CHANGED" if changed else "SAME")
 print(json.dumps(r))
 PY
 ) || die "$updated"
 
+  local verdict=${updated%%$'\n'*}
+  updated=${updated#*$'\n'}
+  if [[ $verdict == SAME ]]; then
+    spend "$nonce"; echo "firewall already at $ip/32 for: $RULE_LABELS"; exit 0
+  fi
+
   curl -fsS -m 15 -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
     -d "$updated" "$api" >/dev/null || die "API write failed"
   spend "$nonce"
-  echo "firewall moved to $ip/32"
+  echo "firewall moved to $ip/32 for: $RULE_LABELS"
 }
 
 # Run only when executed, not when sourced, so the self-test can exercise the

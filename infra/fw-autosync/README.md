@@ -60,9 +60,11 @@ it is. Only the TXT record is read; the A record on the same name is ignored on
 purpose, because acting on an unauthenticated lookup is the one mistake that
 would undo all of this.
 
-Run `./selftest.sh` to see it: 23 checks covering the signature, a statement
+Run `./selftest.sh` to see it: 29 checks covering the signature, a statement
 signed by the wrong key, TXT quoting and chunk-splitting, staleness in both
-directions, and the replay guard. It touches neither DuckDNS nor Linode.
+directions, the replay guard, and the firewall rewrite itself — including that
+an unrelated rule is left alone and that a missing label fails loudly rather
+than quietly doing nothing. It touches neither DuckDNS nor Linode.
 
 ### Why the sensor republishes on a timer, not only on change
 
@@ -95,9 +97,14 @@ not anything changed.
    sudo tee /etc/mitmwatch/linode-fw.token >/dev/null   # paste the token, Ctrl-D
    ```
 
-3. **Firewall + rule id**: find them once and put them in `sync.sh`'s config
-   (`FIREWALL_ID`, `RULE_LABEL`). `curl -H "Authorization: Bearer $T"
-   https://api.linode.com/v4/networking/firewalls` lists them.
+3. **Firewall and rule labels**: find them once. `curl -H "Authorization: Bearer $T"
+   https://api.linode.com/v4/networking/firewalls` lists the firewall and its id;
+   `.../firewalls/<id>/rules` lists the inbound rules and their labels.
+
+   List **every** rule pinned to the sensor's address, not just the witness
+   port. This deployment has two, `ssh` and `witness-mtls`, and moving only one
+   is its own lockout: the witness link comes back while SSH stays pinned to an
+   address that no longer exists.
 
 4. **DuckDNS**: sign in at [duckdns.org](https://www.duckdns.org) (it wants
    nothing but an OAuth login), create one subdomain, and copy the token. On the
@@ -121,7 +128,7 @@ not anything changed.
    # witness
    FWSYNC_DUCKDNS_DOMAIN=your-subdomain
    FWSYNC_FIREWALL_ID=1234567          # from step 3
-   FWSYNC_RULE_LABEL=allow-sensor
+   FWSYNC_RULE_LABELS="ssh witness-mtls"   # every rule pinned to the sensor
    ```
 
 6. **Install and schedule**:

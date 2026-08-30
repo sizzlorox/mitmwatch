@@ -21,6 +21,16 @@ check(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; 
 
 command -v openssl >/dev/null || { echo "openssl required"; exit 2; }
 
+# sync.sh calls python3, which is what Debian has. This repo is developed on
+# Windows, where the interpreter is usually "python" - and where "python3" is a
+# Microsoft Store stub that exists on PATH and fails the moment it is run. So
+# probe by running each candidate, not by asking whether it exists.
+PY3=
+for c in python3 python; do
+  if "$c" -c '' >/dev/null 2>&1; then PY3=$c; break; fi
+done
+[ -n "$PY3" ] || { echo "python required"; exit 2; }
+
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 openssl genpkey -algorithm ed25519 -out "$tmp/k" 2>/dev/null
 openssl pkey -in "$tmp/k" -pubout -out "$tmp/k.pub" 2>/dev/null
@@ -97,6 +107,49 @@ spend zzz
 n=$(wc -l < "$SEEN")
 [ "$n" -le 501 ] && ok "the nonce file stays bounded ($n lines)" \
                  || bad "the nonce file grew to $n lines"
+
+echo "firewall surgery"
+# The JSON rewrite sync.sh actually ships. Two rules follow the sensor in this
+# deployment - "ssh" and "witness-mtls" - and moving only one is its own
+# lockout: the witness link returns while SSH stays pinned to a dead address.
+fwtest() { # $1 labels, $2 ruleset json -> "VERDICT<newline>json"
+  RULE_LABELS="$1" NEW_IP=198.51.100.9 "$PY3" - "$2" <<'PYEOF'
+import json, os, sys
+r = json.loads(sys.argv[1])
+want = os.environ["RULE_LABELS"].split()
+ip = os.environ["NEW_IP"]
+seen, changed = set(), False
+for rule in r.get("inbound", []):
+    if rule.get("label") in want:
+        seen.add(rule["label"])
+        addrs = rule.setdefault("addresses", {})
+        if addrs.get("ipv4") != [f"{ip}/32"]:
+            addrs["ipv4"] = [f"{ip}/32"]
+            changed = True
+missing = [l for l in want if l not in seen]
+if missing:
+    sys.exit("rule(s) not found: " + " ".join(missing))
+print("CHANGED" if changed else "SAME")
+print(json.dumps(r))
+PYEOF
+}
+
+before='{"inbound":[{"label":"ssh","addresses":{"ipv4":["203.0.113.7/24"]}},{"label":"witness-mtls","addresses":{"ipv4":["203.0.113.7/32"]}},{"label":"unrelated","addresses":{"ipv4":["0.0.0.0/0"]}}],"outbound":[]}'
+out=$(fwtest "ssh witness-mtls" "$before") || bad "the rewrite ran"
+check "verdict is CHANGED" "$(head -n1 <<<"$out")" "CHANGED"
+after=$(tail -n+2 <<<"$out")
+check "both sensor rules moved" "$(grep -o '198.51.100.9/32' <<<"$after" | wc -l | tr -d ' ')" "2"
+grep -q '"0.0.0.0/0"' <<<"$after" && ok "an unrelated rule is left alone" \
+                                  || bad "an unrelated rule was rewritten"
+check "a second run is a no-op" "$(fwtest "ssh witness-mtls" "$after" | head -n1)" "SAME"
+
+# The case a substring grep for the address would get wrong: one rule already
+# moved, the other still stale. It must still count as CHANGED.
+half=$("$PY3" -c 'import json,sys; d=json.loads(sys.argv[1]); d["inbound"][0]["addresses"]["ipv4"]=["203.0.113.7/24"]; print(json.dumps(d))' "$after")
+check "one stale rule of two is CHANGED" "$(fwtest "ssh witness-mtls" "$half" | head -n1)" "CHANGED"
+
+fwtest "ssh nope" "$before" >/dev/null 2>&1 && bad "a missing label must fail loudly" \
+                                            || ok "a missing label fails loudly"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
