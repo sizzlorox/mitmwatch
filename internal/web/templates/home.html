@@ -7,241 +7,407 @@
 <link rel="icon" href="{{favicon .State}}">
 <title>mitmwatch - {{.Network}}</title>
 <style>
+  /* The window is the frame. There is no centred document column: a rail down
+     the left carries the six systems, a bar across the top carries the verdict,
+     and everything else is content that fills what is left and scrolls inside
+     itself. The page itself does not scroll on a desktop. */
   :root{
     --bg:#0f1115; --card:#181b21; --edge:#262a33; --ink:#e8eaed; --dim:#9aa0aa;
     --ok:#2ea043; --warn:#d29922; --bad:#f85149; --learn:#58a6ff; --unknown:#6e7681;
     --accent:var(--unknown);
+    --rail:clamp(240px,17vw,312px);
+    --top:104px;
+    color-scheme:dark;
   }
   html[data-state="ok"]{--accent:var(--ok)}
   html[data-state="attention"]{--accent:var(--bad)}
   html[data-state="learning"]{--accent:var(--learn)}
+  /* Light mode redefines the state colours too. It used to override only the
+     greys, which left the alarm palette at its weakest in the theme a daytime
+     glance is most likely to use. */
   @media (prefers-color-scheme: light){
-    :root{--bg:#f6f7f9;--card:#fff;--edge:#e2e5ea;--ink:#1b1f24;--dim:#5b6472}
+    :root{
+      --bg:#eef0f4; --card:#fff; --edge:#d7dbe2; --ink:#1b1f24; --dim:#5b6472;
+      --ok:#1a7f37; --warn:#8a6100; --bad:#cf222e; --learn:#0969da; --unknown:#57606a;
+      color-scheme:light;
+    }
   }
+  @media (max-height:760px){ :root{--top:88px} }
+
   *{box-sizing:border-box}
-  body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-    background:var(--bg);color:var(--ink);overflow-x:hidden}
-  .wrap{max-width:960px;margin:0 auto;padding:16px 16px 40px;font-size:15px}
-  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
-  header h1{font-size:14px;font-weight:600;color:var(--dim);margin:0;letter-spacing:.02em}
-  header .net{font-size:12px;color:var(--dim)}
-
-  /* The verdict and the facts about this sensor, in one row instead of two
-     stacked blocks. The old banner spent ~130px with its facts strip to say one
-     sentence, and repeated the network name and trust level that both already
-     appear elsewhere on the same screen. */
-  .statusbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;
-    margin:10px 0 0;padding:10px 14px;border-radius:10px;
-    background:var(--card);border:1px solid var(--edge);border-left:4px solid var(--accent)}
-  .statusbar .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none;
-    box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
-  .statusbar h2{margin:0;font-size:20px;line-height:1.2;font-weight:600}
-  .statusbar .meta{margin-left:auto;font-size:12px;color:var(--dim);
-    display:flex;flex-wrap:wrap;gap:4px 10px}
-  .statusbar .meta b{color:var(--ink);font-weight:600}
-  html[data-state="attention"] .statusbar{border-left-width:5px;
-    background:color-mix(in srgb,var(--bad) 8%,var(--card))}
-  @media (max-width:640px){.statusbar .meta{margin-left:0;flex-basis:100%}}
-  .dot2{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
-  .dot2.ok{background:var(--ok)} .dot2.bad{background:var(--bad)} .dot2.none{background:var(--unknown)}
-
-  /* The six areas. This page is in the all-clear state almost all of the time,
-     and six cards spending 220px to say "ok" six times is the bulk of what was
-     being wasted. Every area is a chip with a coloured dot; only one that needs
-     attention expands to a full-width row and floats to the front, so the state
-     that matters is the only one that costs space.
-     Only "attention" expands, deliberately. Wi-Fi is permanently "unknown"
-     because that monitor is not built, so expanding on not-ok would put a
-     shouting row on every healthy page; and during the learning window every
-     area is "learning", which would expand all six at once. Both of those are
-     chips, and a check that could not run is also recorded in the activity log
-     rather than relying on this strip to carry it. */
-  ul.strip{list-style:none;display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;padding:0}
-  ul.strip li{display:flex;align-items:center;gap:7px;font-size:13px;
-    padding:3px 11px 3px 9px;border:1px solid var(--edge);border-radius:999px;
-    background:var(--card);white-space:nowrap}
-  ul.strip li::before{content:"";width:7px;height:7px;border-radius:50%;flex:none;background:var(--unknown)}
-  ul.strip li.ok::before{background:var(--ok)}
-  ul.strip li.attention::before{background:var(--bad)}
-  ul.strip li.learning::before{background:var(--learn)}
-  ul.strip li.unknown::before{background:var(--unknown)}
-  /* order:-1 puts the unhappy area first without the server reordering. */
-  ul.strip li.open{flex-basis:100%;white-space:normal;border-radius:10px;order:-1;
-    padding:8px 12px;align-items:flex-start;gap:9px;
-    border-color:color-mix(in srgb,var(--bad) 45%,var(--edge))}
-  ul.strip li.open::before{margin-top:6px;width:8px;height:8px}
-  ul.strip li .band{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--bad)}
-  ul.strip li .line{color:var(--dim);font-size:13px}
-
-  .alert{background:var(--card);border:1px solid var(--edge);border-left:5px solid var(--bad);
-    border-radius:10px;padding:12px 14px;margin:16px 0 0}
-  .alert .band{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--bad)}
-  .alert h4{margin:2px 0 0;font-size:15px}
-  .alert .mean{margin:6px 0 0;font-size:13px;color:var(--dim)}
-  .alert .act{margin:8px 0 0;padding:8px 10px;border-radius:6px;font-size:13px;
-    background:color-mix(in srgb,var(--warn) 12%,transparent)}
-  .alert .evlabel{margin:10px 0 0;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
-  /* Always visible rather than behind a disclosure: the page reloads itself
-     every 15 seconds, so anything the reader opened would close under them.
-     Capped and scrolled instead, because an evidence map is attacker-influenced
-     text and must not be able to lengthen the page without bound. */
-  .alert .ev{margin:4px 0 0;max-height:180px;overflow:auto}
-  .alert table{width:100%;border-collapse:collapse;font-size:12px}
-  .alert td{padding:2px 8px 2px 0;border-top:1px solid var(--edge);vertical-align:top;word-break:break-word}
-  .alert td.k{color:var(--dim);white-space:nowrap;width:1%}
-
-  .cols{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;align-items:start;margin-top:16px}
-  .cols>*{min-width:0}
-  /* The device table is dense (name, address, hardware, two dates); two columns
-     only earn their keep on a wide screen. Below that, stack so the table gets
-     the full width and its cells stop wrapping mid-value. */
-  @media (max-width:900px){.cols{grid-template-columns:1fr}}
-  /* On a phone the hardware address and the first-seen date are the widest,
-     least-needed columns: hide them so the table fits without a sideways
-     scroll. Hidden in CSS, never dropped from the markup - the cells still
-     exist, which is what keeps the page honest at every width. */
-  @media (max-width:560px){
-    table.dev th:nth-child(3),table.dev td:nth-child(3),
-    table.dev th:nth-child(4),table.dev td:nth-child(4){display:none}
-  }
-  .panel{background:var(--card);border:1px solid var(--edge);border-radius:10px;padding:12px 14px}
-  h3.sec{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;
-    margin:0 0 10px;display:flex;align-items:center;gap:8px}
-  h3.sec a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--edge)}
-  h3.sec .count{font-size:11px;color:var(--dim);border:1px solid var(--edge);
-    border-radius:999px;padding:1px 8px}
-  /* Grow with content, then cap and scroll inside rather than lengthen the page. */
-  .tablewrap{overflow:auto;max-height:62vh}
-  table.dev{width:100%;border-collapse:collapse;font-size:13px}
-  table.dev th{text-align:left;font-weight:600;color:var(--dim);font-size:11px;text-transform:uppercase;
-    letter-spacing:.04em;padding:4px 8px 4px 0;border-bottom:1px solid var(--edge);white-space:nowrap;
-    position:sticky;top:0;background:var(--card)}
-  table.dev td{padding:5px 8px 5px 0;border-bottom:1px solid var(--edge);vertical-align:top;white-space:nowrap}
-  /* Names can be long (a full hostname); let only that column wrap. */
-  table.dev td:first-child{white-space:normal;word-break:break-word}
-  table.dev tr:last-child td{border-bottom:none}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    display:flex;flex-direction:column}
+  a{color:var(--learn)}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
   .dim{color:var(--dim)}
-  ul.log{list-style:none;margin:0;padding:0;max-height:62vh;overflow-y:auto}
-  ul.log li{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--edge);font-size:13px}
-  ul.log li:last-child{border-bottom:none}
-  ul.log li::before{content:"";width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px;background:var(--dim)}
-  ul.log li.log-alert::before{background:var(--bad)}
-  ul.log li.log-clear::before{background:var(--ok)}
-  ul.log li.log-stale::before{background:var(--warn)}
-  ul.log li.log-held::before{background:var(--warn)}
-  ul.log li.log-system::before{background:var(--learn)}
-  ul.log .when{color:var(--dim);white-space:nowrap;flex:none;min-width:74px}
-  ul.log .who{color:var(--dim)}
-  .more{margin-top:10px;font-size:12px}
-  /* The device reading has its own clock. When the neighbour table could not be
-     read this stops advancing while the header keeps saying "last checked under
-     a minute ago"; the disagreement is the point. */
-  .asof{margin-left:auto;font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+  .clear{color:var(--dim);font-size:13px;padding:14px 0}
+
+  /* The shell, gated on BOTH axes. Below the gate the page is ordinary document
+     flow, so a short or narrow viewport can never clip content it cannot scroll
+     to. minmax(0,1fr) rather than 1fr: a grid track's default minimum is its
+     content, so a track holding 32 device rows would grow past the window and
+     bring back the page scroll this layout exists to remove. */
+  @media (min-width:900px) and (min-height:620px){
+    html{overflow:hidden}
+    body{height:100vh;height:100dvh;overflow:hidden;
+      display:grid;
+      grid-template-columns:var(--rail) minmax(0,1fr);
+      grid-template-rows:var(--top) minmax(0,1fr)}
+    .brand{grid-area:1/1} .verdict{grid-area:1/2}
+    .rail{grid-area:2/1}  .main{grid-area:2/2}
+  }
+
+  .brand{display:flex;align-items:center;gap:10px;padding:10px 16px;min-width:0;
+    background:var(--card);border-bottom:1px solid var(--edge);
+    position:sticky;top:0;z-index:6}
+  .brand svg{color:var(--accent);flex:none}
+  .brand .bt{min-width:0}
+  .brand h1{margin:0;font-size:13px;font-weight:600;letter-spacing:.14em;color:var(--ink)}
+  .brand .net{display:block;font-size:12px;color:var(--dim);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media (min-width:900px) and (min-height:620px){
+    .brand{position:static;border-right:1px solid var(--edge)}
+  }
+  @media (max-width:899px){ .brand .bt{display:flex;align-items:baseline;gap:10px;min-width:0} }
+
+  .verdict{display:flex;align-items:center;flex-wrap:wrap;gap:8px 18px;
+    padding:14px 20px;min-width:0;overflow:hidden;
+    background:var(--card);border-bottom:1px solid var(--edge)}
+  .verdict .dot{width:14px;height:14px;border-radius:50%;flex:none;background:var(--accent);
+    box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 22%,transparent)}
+  /* flex:1 1 auto beside min-width:0 is required: a -webkit-box flex item that
+     cannot shrink will not clamp. */
+  .verdict h2{margin:0;flex:1 1 auto;min-width:0;
+    font-weight:600;line-height:1.12;letter-spacing:-.01em;
+    font-size:clamp(22px,1.9vw,34px);
+    display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;
+    overflow:hidden}
+  .verdict .vmeta{flex-basis:100%;margin-left:32px;
+    display:flex;flex-wrap:wrap;gap:2px 12px;font-size:12px;color:var(--dim)}
+  @media (min-width:1400px){
+    .verdict .vmeta{flex-basis:auto;margin-left:auto;justify-content:flex-end;text-align:right}
+  }
+
+  .rail{background:var(--card);display:flex;flex-direction:column;min-height:0}
+  @media (min-width:900px) and (min-height:620px){
+    .rail{border-right:1px solid var(--edge);overflow:hidden}
+  }
+  ul.areas{list-style:none;margin:0;padding:0}
+  /* grid-auto-rows:1fr is the one primitive that absorbs residual height: a
+     flexible track never shrinks below its content, so rows with room equalise
+     and rows with tall content keep it, and when the sum exceeds the container
+     it scrolls. Coupled to the 3-line clamp below - without that bound a long
+     wire-supplied finding title could make one row 400px tall. */
+  @media (min-width:900px) and (min-height:620px){
+    ul.areas{flex:1 1 auto;min-height:0;overflow:auto;
+      display:grid;grid-auto-rows:1fr;align-content:stretch}
+  }
+  ul.areas li{display:grid;grid-template-columns:4px minmax(0,1fr);column-gap:12px;
+    align-content:center;padding:10px 16px 10px 0;border-bottom:1px solid var(--edge)}
+  ul.areas li::before{content:"";grid-column:1;grid-row:1/3;
+    background:var(--unknown);border-radius:0 2px 2px 0}
+  ul.areas li.ok::before{background:var(--ok)}
+  ul.areas li.attention::before{background:var(--bad)}
+  ul.areas li.learning::before{background:var(--learn)}
+  ul.areas li.unknown::before{background:var(--unknown)}
+  ul.areas b{grid-column:2;grid-row:1;font-size:14px;font-weight:600}
+  ul.areas .line{grid-column:2;grid-row:2;margin-top:3px;
+    font-size:12px;line-height:1.35;color:var(--dim);
+    display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;
+    overflow:hidden;overflow-wrap:anywhere}
+  ul.areas .st{margin-left:8px;font-size:10px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.07em;vertical-align:1px}
+  ul.areas li.attention .st{color:var(--bad)}
+  ul.areas li.learning .st{color:var(--learn)}
+  ul.areas li.unknown .st{color:var(--unknown)}
+  /* order:-1 floats the unhappy area to the top without the server reordering. */
+  ul.areas li.attention{order:-1;background:color-mix(in srgb,var(--bad) 10%,transparent)}
+  ul.areas li.attention b{color:var(--bad)}
+
+  .facts{flex:none;border-top:1px solid var(--edge);padding:12px 16px;
+    display:grid;gap:5px;font-size:12px}
+  .facts>div{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .facts span{color:var(--dim)}
+  .facts b{font-weight:600;color:var(--ink);text-align:right;overflow-wrap:anywhere}
+  .dot2{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
+  .dot2.ok{background:var(--ok)} .dot2.bad{background:var(--bad)} .dot2.none{background:var(--unknown)}
+  .fine{flex:none;border-top:1px solid var(--edge);padding:10px 16px;
+    font-size:10px;line-height:1.45;color:var(--dim)}
+  /* No rule between the two mobile area columns: nth-child is DOM order while
+     order:-1 is visual, so it would land on the wrong cell during an alert. */
+  @media (min-width:560px) and (max-width:899px){
+    ul.areas{display:grid;grid-template-columns:1fr 1fr}
+    .facts{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  }
+  @media (max-width:559px){ .facts{grid-template-columns:1fr} }
+
+  .main{display:flex;flex-direction:column;min-height:0;min-width:0}
+  @media (min-width:900px) and (min-height:620px){ .main{overflow:hidden} }
+
+  /* The alert deck is an optional FLEX child, never a conditional grid row: a
+     fixed row template would leave a phantom track whenever no alert existed,
+     which is the dead-band bug in another costume. flex:0 1 auto also means a
+     short alert takes a short space rather than reserving empty red. */
+  .deck{padding:14px 16px;border-bottom:1px solid var(--edge);
+    background:color-mix(in srgb,var(--bad) 6%,var(--bg));
+    display:grid;gap:12px;align-content:start;
+    /* min(520px,100%) rather than a bare 520px: auto-fit tracks never shrink
+       below their stated minimum, so on a phone a 520px floor is wider than the
+       window and the page scrolls sideways. The old stylesheet hid that with
+       body{overflow-x:hidden}; this contains it instead. */
+    grid-template-columns:repeat(auto-fit,minmax(min(520px,100%),1fr))}
+  /* 0 0 auto, not 0 1 auto: flex-basis:auto already means "as tall as the alert
+     needs and no taller", so nothing empty is ever reserved. Allowing it to
+     shrink instead let the stage's enormous content win the shrink fight and
+     clip the alert card mid-sentence - the cap below is what should do the
+     limiting, and then the deck scrolls inside itself. */
+  @media (min-width:900px) and (min-height:620px){
+    .deck{flex:0 0 auto;min-height:0;max-height:46vh;overflow:auto}
+  }
+  /* The only rounded, filled, bordered object the page owns - and it exists
+     about one per cent of the time. Card chrome is the signal, not decoration. */
+  .alert{background:var(--card);border-radius:10px;padding:12px 16px;
+    border:1px solid color-mix(in srgb,var(--bad) 40%,var(--edge));
+    box-shadow:inset 4px 0 0 var(--bad)}
+  .alert .band{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--bad)}
+  .alert h3{margin:2px 0 10px;font-size:17px;line-height:1.25}
+  .alert .cells{display:grid;gap:12px 22px;
+    grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))}
+  .alert .cells>div{min-width:0}
+  .alert .lab{margin:0 0 4px;font-size:11px;text-transform:uppercase;
+    letter-spacing:.06em;color:var(--dim)}
+  .alert .mean{margin:0;font-size:13px;line-height:1.5;color:var(--dim)}
+  .alert .act{margin:0;font-size:13px;line-height:1.5;padding:8px 10px;border-radius:6px;
+    background:color-mix(in srgb,var(--warn) 14%,transparent)}
+  /* Attacker-influenced text: capped and scrolled, never behind a disclosure
+     the 15-second refresh would close under the reader. */
+  .alert .ev{max-height:clamp(120px,22vh,260px);overflow:auto}
+  .alert table{width:100%;border-collapse:collapse;font-size:12px}
+  .alert td{padding:3px 10px 3px 0;border-top:1px solid var(--edge);
+    vertical-align:top;word-break:break-word}
+  .alert td.k{color:var(--dim);white-space:nowrap;width:1%}
+
+  .stage{display:grid}
+  .panel{display:grid;grid-template-rows:auto minmax(0,1fr) auto;
+    min-height:0;min-width:0;padding:0 16px}
+  /* The stage takes whatever height the deck leaves, and both panes sit in one
+     definite-height row - which is what makes their equal height structural
+     rather than tuned. The old layout used align-items:start, and that is
+     exactly why Activity used to end 80px above Devices with a ragged void
+     under it. flex:1 1 auto with min-height:0 is required on a flex child that
+     must shrink; without the explicit column template the two panes collapse
+     into one and the second is clipped out of an overflow:hidden viewport. */
+  @media (min-width:900px) and (min-height:620px){
+    .stage{flex:1 1 auto;min-height:0;
+      grid-template-columns:minmax(0,1fr) minmax(300px,min(420px,22vw));
+      grid-template-rows:minmax(0,1fr)}
+    .panel+.panel{border-left:1px solid var(--edge)}
+  }
+  @media (min-width:900px) and (max-width:1199px) and (min-height:620px){
+    .stage{grid-template-columns:minmax(0,1fr);
+           grid-template-rows:minmax(0,1.3fr) minmax(0,1fr)}
+    .panel+.panel{border-left:0;border-top:1px solid var(--edge)}
+  }
+  .phead{display:flex;align-items:center;gap:8px;height:38px;
+    font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
+    border-bottom:1px solid var(--edge)}
+  .phead a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--edge)}
+  .phead .count{font-size:11px;color:var(--dim);
+    border:1px solid var(--edge);border-radius:999px;padding:0 8px}
+  .phead .asof{margin-left:auto;text-transform:none;letter-spacing:0}
+  .pbody{min-height:0;min-width:0;overflow:auto;
+    scrollbar-width:thin;overscroll-behavior:contain}
+  /* min-height, not height: the footer is allowed to wrap to two lines on a
+     narrow pane, and a fixed height would push the second line out through the
+     bottom edge of the window. */
+  .pfoot{display:flex;align-items:center;flex-wrap:wrap;gap:2px 8px;
+    min-height:40px;padding:6px 0;
+    font-size:11px;color:var(--dim);border-top:1px solid var(--edge)}
+
+  table.dev{width:100%;border-collapse:collapse;font-size:13px}
+  /* The sticky header paints --bg, not --card: the panes have no card surface
+     behind them any more, so a --card header would slide over the rows. */
+  table.dev th{position:static;text-align:left;font-weight:600;font-size:11px;
+    color:var(--dim);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;
+    padding:6px 12px 6px 0;border-bottom:1px solid var(--edge);background:var(--bg)}
+  @media (min-width:900px) and (min-height:620px){
+    table.dev th{position:sticky;top:0;z-index:1}
+  }
+  table.dev td{padding-block:clamp(5px,.75vh,12px);padding-right:12px;
+    border-bottom:1px solid var(--edge);vertical-align:top;white-space:nowrap;
+    font-variant-numeric:tabular-nums}
+  table.dev td:first-child{white-space:normal;overflow-wrap:anywhere;padding-right:14px}
   /* A device that is no longer here still belongs in the list - dimmed, not
      deleted, because "was here yesterday" is the thing history is for. */
   table.dev tr.gone td{opacity:.55}
   table.dev .now{color:var(--ok)}
-  .note{font-size:10px;color:var(--dim);border:1px solid var(--edge);border-radius:999px;
-    padding:0 6px;white-space:nowrap}
-  .clear{color:var(--dim);padding:6px 0;font-size:13px}
-  footer{margin-top:24px;color:var(--dim);font-size:11px}
-  a{color:var(--learn)}
+  .note{display:inline-block;font-size:10px;color:var(--dim);white-space:nowrap;
+    border:1px solid var(--edge);border-radius:999px;padding:0 6px}
+  /* Hidden in CSS, never dropped from the markup - that is what keeps the page
+     honest at every width. */
+  @media (max-width:560px){
+    table.dev th:nth-child(3),table.dev td:nth-child(3),
+    table.dev th:nth-child(4),table.dev td:nth-child(4){display:none}
+  }
+
+  ul.log{list-style:none;margin:0;padding:0}
+  @media (min-width:900px) and (min-height:620px){
+    ul.log{display:grid;grid-auto-rows:1fr;align-content:stretch}
+  }
+  ul.log li{display:grid;grid-template-columns:3px 92px minmax(0,1fr);column-gap:10px;
+    align-content:center;padding:8px 0;border-bottom:1px solid var(--edge);font-size:13px}
+  ul.log li::before{content:"";grid-column:1;grid-row:1/3;
+    background:var(--dim);border-radius:2px}
+  ul.log li.log-alert::before {background:var(--bad)}
+  ul.log li.log-clear::before {background:var(--ok)}
+  ul.log li.log-stale::before {background:var(--warn)}
+  ul.log li.log-held::before  {background:var(--warn)}
+  ul.log li.log-system::before{background:var(--learn)}
+  ul.log .when{grid-column:2;grid-row:1;font-size:11px;line-height:1.3;
+    color:var(--dim);overflow-wrap:anywhere}
+  ul.log .what{grid-column:3;grid-row:1;line-height:1.35;overflow-wrap:anywhere}
+  ul.log .who {grid-column:3;grid-row:2;margin-top:2px;font-size:11px;
+    color:var(--dim);overflow-wrap:anywhere}
+
+  /* The alarm runs on four channels that cost no layout at all: the largest
+     text grows and turns red, the top bar tints, a rule appears under it, and
+     the whole window gets a frame. No grid track changes size in any state -
+     inset box-shadow rather than border-width is what keeps that true. */
+  html[data-state="attention"] .verdict h2{font-size:clamp(26px,2.7vw,48px);
+    color:var(--bad);-webkit-line-clamp:1;line-clamp:1}
+  html[data-state="attention"] .verdict,
+  html[data-state="attention"] .brand{background:color-mix(in srgb,var(--bad) 14%,var(--card))}
+  @media (min-width:900px) and (min-height:620px){
+    html[data-state="attention"] .verdict,
+    html[data-state="attention"] .brand{box-shadow:inset 0 -4px 0 var(--bad)}
+  }
+  /* Fixed against the viewport, so overflow:hidden cannot clip it and it stays
+     put while a pane scrolls. pointer-events:none keeps the panes usable. */
+  html[data-state="attention"] body::after{
+    content:"";position:fixed;inset:0;z-index:20;pointer-events:none;
+    border:3px solid var(--bad)}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
+
+<div class="brand">
+  <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true" fill="none"
+       stroke="currentColor" stroke-width="2.5">
+    <circle cx="16" cy="16" r="8"/><circle cx="16" cy="16" r="3" fill="currentColor" stroke="none"/>
+  </svg>
+  <div class="bt">
     <h1>MITMWATCH</h1>
-    <span class="net">{{.Network}} &middot; last checked {{since .LastCheck}}</span>
-  </header>
-
-  <div class="statusbar">
-    <span class="dot"></span>
-    <h2>{{.Sentence}}</h2>
-    <span class="meta">
-      <span>trust <b>{{.Trust}}</b></span>
-      {{if .Tier}}<span>watching <b>{{.Tier}}</b></span>{{end}}
-      <span>outside
-        {{if .Witness.Configured}}
-          {{if .Witness.Connected}}<span class="dot2 ok"></span> <b>connected</b>{{else}}<span class="dot2 bad"></span> <b>link down</b>{{end}}
-        {{else}}<span class="dot2 none"></span> <b>not set up</b>{{end}}
-      </span>
-      {{if .Uptime}}<span>running <b>{{.Uptime}}</b></span>{{end}}
-    </span>
+    <span class="net">{{.Network}}</span>
   </div>
+</div>
 
-  <ul class="strip">
+<div class="verdict">
+  <span class="dot"></span>
+  <h2>{{.Sentence}}</h2>
+  <span class="vmeta">
+    {{if .LastCheck.IsZero}}<span>not checked yet</span>
+    {{else}}<span title="{{at .LastCheck}}">checked {{since .LastCheck}}</span>{{end}}
+    {{if .Alerts}}<span>{{len .Alerts}} to look at</span>{{end}}
+  </span>
+</div>
+
+<div class="rail">
+  <ul class="areas">
     {{range .Areas}}
-    <li class="{{.State}}{{if eq .State "attention"}} open{{end}}">
-      <span>{{.Name}}{{if eq .State "attention"}} <span class="band">{{.State}}</span><br><span class="line">{{.Line}}</span>{{end}}</span>
+    <li class="{{.State}}">
+      <b>{{.Name}}{{if ne .State "ok"}}<span class="st">{{.State}}</span>{{end}}</b>
+      <span class="line">{{.Line}}</span>
     </li>
     {{end}}
-    {{if gt .Held 0}}<li class="learning"><span>{{.Held}} held while learning</span></li>{{end}}
+    {{if not .Areas}}
+    <li class="unknown"><b>Systems</b>
+      <span class="line">The first check has not finished yet.</span></li>
+    {{end}}
   </ul>
 
-  {{range .Alerts}}
-    {{range .Findings}}
+  <div class="facts">
+    <div><span>trust</span><b>{{.Trust}}</b></div>
+    {{if .Tier}}<div><span>watching</span><b>{{.Tier}}</b></div>{{end}}
+    <div><span>outside</span><b>{{if .Witness.Configured}}{{if .Witness.Connected}}<span class="dot2 ok"></span>connected{{else}}<span class="dot2 bad"></span>link down{{end}}{{else}}<span class="dot2 none"></span>not set up{{end}}</b></div>
+    {{if .Witness.Addr}}<div><span>outside address</span><b class="mono">{{.Witness.Addr}}</b></div>{{end}}
+    {{if .Uptime}}<div><span>running</span><b>{{.Uptime}}</b></div>{{end}}
+    {{if gt .Held 0}}<div><span>held while learning</span><b>{{.Held}}</b></div>{{end}}
+  </div>
+
+  <div class="fine">mitmwatch watches this network and this device. It cannot see attacks aimed only at other machines.</div>
+</div>
+
+<div class="main">
+
+  {{if .Alerts}}
+  <div class="deck">
+    {{range .Alerts}}{{range .Findings}}
     <div class="alert">
       <div class="band">{{upper .Band}} &middot; score {{.Score}}</div>
-      <h4>{{.Title}}</h4>
-      {{if .Meaning}}<p class="mean">{{.Meaning}}</p>{{end}}
-      {{if .Action}}<div class="act"><strong>What to do:</strong> {{.Action}}</div>{{end}}
-      {{if .Evidence}}
-      <div class="evlabel">Technical details</div>
-      <div class="ev">
-        <table>
-        {{range $k,$v := .Evidence}}<tr><td class="k">{{$k}}</td><td>{{$v}}</td></tr>{{end}}
-        </table>
-      </div>{{end}}
+      <h3>{{.Title}}</h3>
+      <div class="cells">
+        {{if .Meaning}}<div><p class="lab">Why</p><p class="mean">{{.Meaning}}</p></div>{{end}}
+        {{if .Action}}<div><p class="lab">What to do</p><p class="act">{{.Action}}</p></div>{{end}}
+        {{if .Evidence}}
+        <div><p class="lab">Technical details</p>
+          <div class="ev"><table>
+          {{range $k,$v := .Evidence}}<tr><td class="k">{{$k}}</td><td>{{$v}}</td></tr>{{end}}
+          </table></div>
+        </div>{{end}}
+      </div>
     </div>
-    {{end}}
+    {{end}}{{end}}
+  </div>
   {{end}}
 
-  <div class="cols">
+  <div class="stage">
+
     <div class="panel">
-      <h3 class="sec"><a href="/devices">Devices</a> <span class="count">{{.Devices}}</span>
-        {{if .DevicesAt}}<span class="asof" title="{{at .DevicesAt}}">read {{since .DevicesAt}}</span>{{end}}</h3>
-      {{if .DeviceList}}
-      <div class="tablewrap">
-      <table class="dev">
-        <thead><tr><th>Name</th><th>Address</th><th>Hardware</th><th>First seen</th><th>Last seen</th></tr></thead>
-        <tbody>
-        {{range .DeviceList}}
-          <tr{{if not .Present}} class="gone"{{end}}>
-            <td>{{if .Name}}{{.Name}}{{else}}<span class="dim">unnamed</span>{{end}}
-              {{if .Random}}<span class="note" title="This device uses a randomised hardware address, so its history is of the address, not of the device.">random address</span>{{end}}</td>
-            <td class="mono">{{.IP}}</td>
-            <td class="mono dim">{{.MAC}}</td>
-            <td class="dim" title="{{at .FirstSeen}}">{{since .FirstSeen}}</td>
-            <td class="dim" title="{{at .LastSeen}}">{{if .Present}}<span class="now">now</span>{{else}}{{since .LastSeen}}{{end}}</td>
-          </tr>
-        {{end}}
-        </tbody>
-      </table>
+      <div class="phead"><a href="/devices">Devices</a>
+        <span class="count">{{.Devices}}</span>
+        {{if not .DevicesAt.IsZero}}<span class="asof" title="{{at .DevicesAt}}">read {{since .DevicesAt}}</span>{{end}}</div>
+      <div class="pbody">
+        {{if .DeviceList}}
+        <table class="dev">
+          <thead><tr><th>Name</th><th>Address</th><th>Hardware</th><th>First seen</th><th>Last seen</th></tr></thead>
+          <tbody>
+          {{range .DeviceList}}
+            <tr{{if not .Present}} class="gone"{{end}}>
+              <td>{{if .Name}}{{.Name}}{{else}}<span class="dim">unnamed</span>{{end}}
+                {{if .Random}}<span class="note" title="This device uses a randomised hardware address, so its history is of the address, not of the device.">random address</span>{{end}}</td>
+              <td class="mono">{{.IP}}</td>
+              <td class="mono dim">{{.MAC}}</td>
+              <td class="dim" title="{{at .FirstSeen}}">{{since .FirstSeen}}</td>
+              <td class="dim" title="{{at .LastSeen}}">{{if .Present}}<span class="now">now</span>{{else}}{{since .LastSeen}}{{end}}</td>
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+        {{else}}<div class="clear">No devices seen yet.</div>{{end}}
       </div>
-      {{else}}<div class="clear">No devices seen yet.</div>{{end}}
+      <div class="pfoot">{{.Devices}} devices{{if not .DevicesAt.IsZero}} &middot; read {{since .DevicesAt}}{{end}}</div>
     </div>
 
     <div class="panel">
-      <h3 class="sec"><a href="/activity">Activity</a></h3>
+      <div class="phead"><a href="/activity">Activity</a>
+        {{if .Events}}<span class="count">{{.EventsShown}}</span>{{end}}</div>
       {{if .Events}}
-      <ul class="log">
+      <ul class="pbody log">
       {{range .Events}}
-        <li class="log-{{.Kind}}"><span class="when" title="{{at .When}}">{{since .When}}</span><span class="what">{{.Text}}{{if .Device}} <span class="who">{{.Device}}</span>{{end}}</span></li>
+        <li class="log-{{.Kind}}"><span class="when" title="{{at .When}}">{{since .When}}</span><span class="what">{{.Text}}</span>{{if .Device}}<span class="who">{{.Device}}</span>{{end}}</li>
       {{end}}
       </ul>
-      <div class="more">
+      {{else}}<div class="pbody"><div class="clear">Nothing recorded on this network yet.</div></div>{{end}}
+      <div class="pfoot">
         {{if gt .EventsKept .EventsShown}}<a href="/activity">The other {{sub .EventsKept .EventsShown}}, with what was seen</a>
         {{else}}<a href="/activity">Full log, with what was seen</a>{{end}}
         {{if gt .EventsTotal .EventsKept}}<span class="dim">&middot; {{.EventsTotal}} recorded in all, the oldest are not kept</span>{{end}}
       </div>
-      {{else}}<div class="clear">Nothing recorded on this network yet.
-        <a href="/activity">Full log</a></div>{{end}}
     </div>
-  </div>
 
-  <footer>mitmwatch watches this network and this device. It cannot see attacks aimed only at other machines.</footer>
+  </div>
 </div>
+
 </body>
 </html>{{end}}

@@ -28,24 +28,33 @@ styles and its icon are all served from the binary — so it renders even when t
 internet is exactly what is broken. The browser-tab favicon turns red the moment
 something needs attention, so a background tab still tells you.
 
-The page is in the all-clear state almost all of the time, and it is laid out for
-that: the six areas collapse to one row of chips, and only an area that needs
-attention expands and floats to the front. A calm network is a short page; an
-alarmed one grows. There are no icons and no emoji — the words are already
-short, and the one coloured dot per chip is the only signal that has to carry.
+The window is the frame. A rail down the left carries the six systems and the
+sensor's own facts; the verdict runs across the top as the largest text on the
+page; everything else fills what is left and scrolls inside itself, so the page
+does not scroll and there is no dead band at the bottom of a large screen.
+Nothing is centred and nothing has a maximum width.
+
+It is laid out for the state it is in almost all of the time. In the calm state
+there is no card chrome anywhere — the panes sit flush on the page ground,
+separated by hairlines. The only rounded, filled, bordered object the design
+owns is the alert card, so card chrome is the signal rather than decoration. An
+alarm escalates on four channels that cost no layout at all: the verdict grows
+and turns red, the top bar tints, a rule appears beneath it, and a frame is
+drawn around the whole window. No track changes size, so nothing reflows under
+the reader. There are no icons beyond one inline SVG mark, and no emoji.
 
 *(The screenshots below use fabricated data; the attack shown is illustrative.)*
 
-![mitmwatch dashboard showing a detected router-impersonation (ARP) attack — a red status bar, the affected area expanded out of the status strip, a plain-language explanation with what to do and the evidence behind it, then the device list and the activity log](docs/dashboard.png)
+![mitmwatch dashboard showing a detected router-impersonation (ARP) attack — a red frame around the window, the verdict in large red type, the affected system floated to the top of the left rail, and an alert card carrying why, what to do and the evidence, above the device and activity panes](docs/dashboard.png)
 
 It is responsive, and the same page reads cleanly on a phone:
 
-<p align="center"><img src="docs/dashboard-mobile.png" width="380" alt="the mitmwatch dashboard on a phone: the status bar wraps, the area chips reflow, and the device table drops its widest columns"></p>
+<p align="center"><img src="docs/dashboard-mobile.png" width="380" alt="the mitmwatch dashboard on a phone: the rail unfolds into full-width sections in document order, and the device table drops its widest columns"></p>
 
 When nothing is wrong it stays calm and green, with the device list and recent
 activity to hand:
 
-![mitmwatch dashboard in its all-clear state — a green status bar, the six areas collapsed to a single row of chips, and the devices and activity panels](docs/dashboard-clear.png)
+![mitmwatch dashboard in its all-clear state — a green verdict across the top, the six systems down the left rail with the sensor facts beneath them, and the device and activity panes filling the rest of the window](docs/dashboard-clear.png)
 
 Devices are remembered by hardware address, so one that is switched off stays on
 the list with the time it was last seen rather than silently disappearing, and
