@@ -28,18 +28,24 @@ styles and its icon are all served from the binary — so it renders even when t
 internet is exactly what is broken. The browser-tab favicon turns red the moment
 something needs attention, so a background tab still tells you.
 
+The page is in the all-clear state almost all of the time, and it is laid out for
+that: the six areas collapse to one row of chips, and only an area that needs
+attention expands and floats to the front. A calm network is a short page; an
+alarmed one grows. There are no icons and no emoji — the words are already
+short, and the one coloured dot per chip is the only signal that has to carry.
+
 *(The screenshots below use fabricated data; the attack shown is illustrative.)*
 
-![mitmwatch dashboard showing a detected router-impersonation (ARP) attack — a red banner, the affected card, a plain-language explanation with what to do, the device list and a live activity log](docs/dashboard.png)
+![mitmwatch dashboard showing a detected router-impersonation (ARP) attack — a red status bar, the affected area expanded out of the status strip, a plain-language explanation with what to do and the evidence behind it, then the device list and the activity log](docs/dashboard.png)
 
 It is responsive, and the same page reads cleanly on a phone:
 
-<p align="center"><img src="docs/dashboard-mobile.png" width="380" alt="the mitmwatch dashboard on a phone, cards stacked into a single column"></p>
+<p align="center"><img src="docs/dashboard-mobile.png" width="380" alt="the mitmwatch dashboard on a phone: the status bar wraps, the area chips reflow, and the device table drops its widest columns"></p>
 
 When nothing is wrong it stays calm and green, with the device list and recent
 activity to hand:
 
-![mitmwatch dashboard in its all-clear state — a green banner, six green area cards, and the devices and activity panels](docs/dashboard-clear.png)
+![mitmwatch dashboard in its all-clear state — a green status bar, the six areas collapsed to a single row of chips, and the devices and activity panels](docs/dashboard-clear.png)
 
 Devices are remembered by hardware address, so one that is switched off stays on
 the list with the time it was last seen rather than silently disappearing, and

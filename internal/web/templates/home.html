@@ -21,76 +21,109 @@
   *{box-sizing:border-box}
   body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     background:var(--bg);color:var(--ink);overflow-x:hidden}
-  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 64px}
+  .wrap{max-width:960px;margin:0 auto;padding:16px 16px 40px;font-size:15px}
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
-  header h1{font-size:15px;font-weight:600;color:var(--dim);margin:0;letter-spacing:.02em}
-  header .net{font-size:13px;color:var(--dim)}
-  .banner{margin:16px 0 10px;padding:22px 20px;border-radius:14px;background:var(--card);
-    border:1px solid var(--edge);border-left:6px solid var(--accent);display:flex;gap:16px;align-items:center}
-  .banner .dot{width:14px;height:14px;border-radius:50%;background:var(--accent);flex:none;
-    box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 25%,transparent)}
-  .banner h2{margin:0;font-size:22px}
-  .banner .sub{color:var(--dim);font-size:13px;margin-top:2px}
-  .facts{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 4px}
-  .fact{font-size:12px;color:var(--dim);background:var(--card);border:1px solid var(--edge);
-    border-radius:999px;padding:5px 12px;display:flex;align-items:center;gap:6px}
-  .fact b{color:var(--ink);font-weight:600}
-  .dot2{width:8px;height:8px;border-radius:50%;flex:none}
+  header h1{font-size:14px;font-weight:600;color:var(--dim);margin:0;letter-spacing:.02em}
+  header .net{font-size:12px;color:var(--dim)}
+
+  /* The verdict and the facts about this sensor, in one row instead of two
+     stacked blocks. The old banner spent ~130px with its facts strip to say one
+     sentence, and repeated the network name and trust level that both already
+     appear elsewhere on the same screen. */
+  .statusbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;
+    margin:10px 0 0;padding:10px 14px;border-radius:10px;
+    background:var(--card);border:1px solid var(--edge);border-left:4px solid var(--accent)}
+  .statusbar .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none;
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+  .statusbar h2{margin:0;font-size:20px;line-height:1.2;font-weight:600}
+  .statusbar .meta{margin-left:auto;font-size:12px;color:var(--dim);
+    display:flex;flex-wrap:wrap;gap:4px 10px}
+  .statusbar .meta b{color:var(--ink);font-weight:600}
+  html[data-state="attention"] .statusbar{border-left-width:5px;
+    background:color-mix(in srgb,var(--bad) 8%,var(--card))}
+  @media (max-width:640px){.statusbar .meta{margin-left:0;flex-basis:100%}}
+  .dot2{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
   .dot2.ok{background:var(--ok)} .dot2.bad{background:var(--bad)} .dot2.none{background:var(--unknown)}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin:16px 0}
-  .card{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:14px}
-  .card .head{display:flex;align-items:center;gap:8px;font-weight:600}
-  .card .icon{font-size:18px}
-  .card .line{color:var(--dim);font-size:13px;margin-top:6px}
-  .pill{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.04em;
-    padding:2px 8px;border-radius:999px;border:1px solid var(--edge);color:var(--dim)}
-  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,var(--edge))}
-  .pill.attention{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 50%,var(--edge))}
-  .pill.learning{color:var(--learn);border-color:color-mix(in srgb,var(--learn) 50%,var(--edge))}
-  h3.sec{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin:26px 0 10px;
-    display:flex;align-items:center;gap:8px}
-  h3.sec .count{font-size:11px;color:var(--dim);background:var(--card);border:1px solid var(--edge);
-    border-radius:999px;padding:1px 8px}
+
+  /* The six areas. This page is in the all-clear state almost all of the time,
+     and six cards spending 220px to say "ok" six times is the bulk of what was
+     being wasted. Every area is a chip with a coloured dot; only one that needs
+     attention expands to a full-width row and floats to the front, so the state
+     that matters is the only one that costs space.
+     Only "attention" expands, deliberately. Wi-Fi is permanently "unknown"
+     because that monitor is not built, so expanding on not-ok would put a
+     shouting row on every healthy page; and during the learning window every
+     area is "learning", which would expand all six at once. Both of those are
+     chips, and a check that could not run is also recorded in the activity log
+     rather than relying on this strip to carry it. */
+  ul.strip{list-style:none;display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;padding:0}
+  ul.strip li{display:flex;align-items:center;gap:7px;font-size:13px;
+    padding:3px 11px 3px 9px;border:1px solid var(--edge);border-radius:999px;
+    background:var(--card);white-space:nowrap}
+  ul.strip li::before{content:"";width:7px;height:7px;border-radius:50%;flex:none;background:var(--unknown)}
+  ul.strip li.ok::before{background:var(--ok)}
+  ul.strip li.attention::before{background:var(--bad)}
+  ul.strip li.learning::before{background:var(--learn)}
+  ul.strip li.unknown::before{background:var(--unknown)}
+  /* order:-1 puts the unhappy area first without the server reordering. */
+  ul.strip li.open{flex-basis:100%;white-space:normal;border-radius:10px;order:-1;
+    padding:8px 12px;align-items:flex-start;gap:9px;
+    border-color:color-mix(in srgb,var(--bad) 45%,var(--edge))}
+  ul.strip li.open::before{margin-top:6px;width:8px;height:8px}
+  ul.strip li .band{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--bad)}
+  ul.strip li .line{color:var(--dim);font-size:13px}
+
   .alert{background:var(--card);border:1px solid var(--edge);border-left:5px solid var(--bad);
-    border-radius:12px;padding:16px;margin-bottom:12px}
-  .alert h4{margin:0 0 4px;font-size:17px}
+    border-radius:10px;padding:12px 14px;margin:16px 0 0}
   .alert .band{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--bad)}
-  .alert .mean{margin:8px 0 0}
-  .alert .act{margin:8px 0 0;padding:10px 12px;background:color-mix(in srgb,var(--warn) 12%,transparent);
-    border-radius:8px;font-size:14px}
-  .alert details{margin-top:10px}
-  .alert summary{cursor:pointer;color:var(--dim);font-size:13px}
-  .alert table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
-  .alert td{padding:3px 8px;border-top:1px solid var(--edge);vertical-align:top}
+  .alert h4{margin:2px 0 0;font-size:15px}
+  .alert .mean{margin:6px 0 0;font-size:13px;color:var(--dim)}
+  .alert .act{margin:8px 0 0;padding:8px 10px;border-radius:6px;font-size:13px;
+    background:color-mix(in srgb,var(--warn) 12%,transparent)}
+  .alert .evlabel{margin:10px 0 0;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  /* Always visible rather than behind a disclosure: the page reloads itself
+     every 15 seconds, so anything the reader opened would close under them.
+     Capped and scrolled instead, because an evidence map is attacker-influenced
+     text and must not be able to lengthen the page without bound. */
+  .alert .ev{margin:4px 0 0;max-height:180px;overflow:auto}
+  .alert table{width:100%;border-collapse:collapse;font-size:12px}
+  .alert td{padding:2px 8px 2px 0;border-top:1px solid var(--edge);vertical-align:top;word-break:break-word}
   .alert td.k{color:var(--dim);white-space:nowrap;width:1%}
-  .cols{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;align-items:start}
+
+  .cols{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;align-items:start;margin-top:16px}
   .cols>*{min-width:0}
-  /* The device table is dense (name, IP, MAC, age); two columns only earn their
-     keep on a wide screen. Below that, stack so the table gets the full width
-     and its cells stop wrapping mid-value. */
+  /* The device table is dense (name, address, hardware, two dates); two columns
+     only earn their keep on a wide screen. Below that, stack so the table gets
+     the full width and its cells stop wrapping mid-value. */
   @media (max-width:900px){.cols{grid-template-columns:1fr}}
-  /* On a phone the hardware address is the widest, least-needed column: drop it
-     so the table fits without a sideways scroll. */
+  /* On a phone the hardware address and the first-seen date are the widest,
+     least-needed columns: hide them so the table fits without a sideways
+     scroll. Hidden in CSS, never dropped from the markup - the cells still
+     exist, which is what keeps the page honest at every width. */
   @media (max-width:560px){
-    table.dev th:nth-child(3),table.dev td:nth-child(3){display:none}
+    table.dev th:nth-child(3),table.dev td:nth-child(3),
     table.dev th:nth-child(4),table.dev td:nth-child(4){display:none}
   }
-  .panel{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:14px 16px}
-  .panel h3.sec{margin:2px 0 10px}
+  .panel{background:var(--card);border:1px solid var(--edge);border-radius:10px;padding:12px 14px}
+  h3.sec{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;
+    margin:0 0 10px;display:flex;align-items:center;gap:8px}
+  h3.sec a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--edge)}
+  h3.sec .count{font-size:11px;color:var(--dim);border:1px solid var(--edge);
+    border-radius:999px;padding:1px 8px}
   /* Grow with content, then cap and scroll inside rather than lengthen the page. */
   .tablewrap{overflow:auto;max-height:62vh}
   table.dev{width:100%;border-collapse:collapse;font-size:13px}
   table.dev th{text-align:left;font-weight:600;color:var(--dim);font-size:11px;text-transform:uppercase;
-    letter-spacing:.04em;padding:6px 8px 6px 0;border-bottom:1px solid var(--edge);white-space:nowrap;
+    letter-spacing:.04em;padding:4px 8px 4px 0;border-bottom:1px solid var(--edge);white-space:nowrap;
     position:sticky;top:0;background:var(--card)}
-  table.dev td{padding:7px 8px 7px 0;border-bottom:1px solid var(--edge);vertical-align:top;white-space:nowrap}
+  table.dev td{padding:5px 8px 5px 0;border-bottom:1px solid var(--edge);vertical-align:top;white-space:nowrap}
   /* Names can be long (a full hostname); let only that column wrap. */
   table.dev td:first-child{white-space:normal;word-break:break-word}
   table.dev tr:last-child td{border-bottom:none}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
   .dim{color:var(--dim)}
   ul.log{list-style:none;margin:0;padding:0;max-height:62vh;overflow-y:auto}
-  ul.log li{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--edge);font-size:13px}
+  ul.log li{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--edge);font-size:13px}
   ul.log li:last-child{border-bottom:none}
   ul.log li::before{content:"";width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px;background:var(--dim)}
   ul.log li.log-alert::before{background:var(--bad)}
@@ -98,12 +131,12 @@
   ul.log li.log-stale::before{background:var(--warn)}
   ul.log li.log-held::before{background:var(--warn)}
   ul.log li.log-system::before{background:var(--learn)}
-  ul.log .when{color:var(--dim);white-space:nowrap;flex:none;min-width:78px}
+  ul.log .when{color:var(--dim);white-space:nowrap;flex:none;min-width:74px}
   ul.log .who{color:var(--dim)}
   .more{margin-top:10px;font-size:12px}
-  /* When the neighbour table could not be read, this stops advancing while the
-     header keeps saying "last checked under a minute ago". The disagreement is
-     the point: it must be visible that the list is older than the page. */
+  /* The device reading has its own clock. When the neighbour table could not be
+     read this stops advancing while the header keeps saying "last checked under
+     a minute ago"; the disagreement is the point. */
   .asof{margin-left:auto;font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
   /* A device that is no longer here still belongs in the list - dimmed, not
      deleted, because "was here yesterday" is the thing history is for. */
@@ -111,8 +144,8 @@
   table.dev .now{color:var(--ok)}
   .note{font-size:10px;color:var(--dim);border:1px solid var(--edge);border-radius:999px;
     padding:0 6px;white-space:nowrap}
-  .clear{color:var(--dim);padding:8px 0}
-  footer{margin-top:32px;color:var(--dim);font-size:12px;display:flex;gap:16px;flex-wrap:wrap}
+  .clear{color:var(--dim);padding:6px 0;font-size:13px}
+  footer{margin-top:24px;color:var(--dim);font-size:11px}
   a{color:var(--learn)}
 </style>
 </head>
@@ -123,37 +156,30 @@
     <span class="net">{{.Network}} &middot; last checked {{since .LastCheck}}</span>
   </header>
 
-  <div class="banner">
+  <div class="statusbar">
     <span class="dot"></span>
-    <div>
-      <h2>{{.Sentence}}</h2>
-      <div class="sub">Network "{{.Network}}" &middot; trust level {{.Trust}}</div>
-    </div>
-  </div>
-
-  <div class="facts">
-    <span class="fact"><b>Trust</b> {{.Trust}}</span>
-    {{if .Tier}}<span class="fact"><b>Watching</b> {{.Tier}}</span>{{end}}
-    <span class="fact"><b>Outside check</b>
-      {{if .Witness.Configured}}
-        {{if .Witness.Connected}}<span class="dot2 ok"></span>connected{{else}}<span class="dot2 bad"></span>link down{{end}}
-      {{else}}<span class="dot2 none"></span>not set up{{end}}
+    <h2>{{.Sentence}}</h2>
+    <span class="meta">
+      <span>trust <b>{{.Trust}}</b></span>
+      {{if .Tier}}<span>watching <b>{{.Tier}}</b></span>{{end}}
+      <span>outside
+        {{if .Witness.Configured}}
+          {{if .Witness.Connected}}<span class="dot2 ok"></span> <b>connected</b>{{else}}<span class="dot2 bad"></span> <b>link down</b>{{end}}
+        {{else}}<span class="dot2 none"></span> <b>not set up</b>{{end}}
+      </span>
+      {{if .Uptime}}<span>running <b>{{.Uptime}}</b></span>{{end}}
     </span>
-    {{if .Uptime}}<span class="fact"><b>Running</b> {{.Uptime}}</span>{{end}}
   </div>
 
-  <div class="grid">
+  <ul class="strip">
     {{range .Areas}}
-    <div class="card">
-      <div class="head"><span class="icon">{{icon .Key}}</span>{{.Name}}
-        <span class="pill {{.State}}">{{.State}}</span></div>
-      <div class="line">{{.Line}}</div>
-    </div>
+    <li class="{{.State}}{{if eq .State "attention"}} open{{end}}">
+      <span>{{.Name}}{{if eq .State "attention"}} <span class="band">{{.State}}</span><br><span class="line">{{.Line}}</span>{{end}}</span>
+    </li>
     {{end}}
-  </div>
+    {{if gt .Held 0}}<li class="learning"><span>{{.Held}} held while learning</span></li>{{end}}
+  </ul>
 
-  {{if .Alerts}}
-  <h3 class="sec">Needs your attention</h3>
   {{range .Alerts}}
     {{range .Findings}}
     <div class="alert">
@@ -162,22 +188,19 @@
       {{if .Meaning}}<p class="mean">{{.Meaning}}</p>{{end}}
       {{if .Action}}<div class="act"><strong>What to do:</strong> {{.Action}}</div>{{end}}
       {{if .Evidence}}
-      <details><summary>Technical details</summary>
+      <div class="evlabel">Technical details</div>
+      <div class="ev">
         <table>
         {{range $k,$v := .Evidence}}<tr><td class="k">{{$k}}</td><td>{{$v}}</td></tr>{{end}}
         </table>
-      </details>{{end}}
+      </div>{{end}}
     </div>
     {{end}}
-  {{end}}
-  {{else}}
-  <h3 class="sec">Status</h3>
-  <div class="clear">Nothing to report right now. {{if gt .Held 0}}{{.Held}} finding(s) held back while learning.{{end}}</div>
   {{end}}
 
   <div class="cols">
     <div class="panel">
-      <h3 class="sec">Devices <span class="count">{{.Devices}}</span>
+      <h3 class="sec"><a href="/devices">Devices</a> <span class="count">{{.Devices}}</span>
         {{if .DevicesAt}}<span class="asof" title="{{at .DevicesAt}}">read {{since .DevicesAt}}</span>{{end}}</h3>
       {{if .DeviceList}}
       <div class="tablewrap">
@@ -201,7 +224,7 @@
     </div>
 
     <div class="panel">
-      <h3 class="sec">Activity</h3>
+      <h3 class="sec"><a href="/activity">Activity</a></h3>
       {{if .Events}}
       <ul class="log">
       {{range .Events}}
@@ -218,10 +241,7 @@
     </div>
   </div>
 
-  <footer>
-    <a href="/devices">All devices ({{.Devices}})</a>
-    <span>mitmwatch watches this network and this device. It cannot see attacks aimed only at other machines.</span>
-  </footer>
+  <footer>mitmwatch watches this network and this device. It cannot see attacks aimed only at other machines.</footer>
 </div>
 </body>
 </html>{{end}}

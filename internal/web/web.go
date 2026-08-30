@@ -223,7 +223,6 @@ func (s *State) execLocked(exec func(any) error, build func() any) error {
 func Handler(s *State) http.Handler {
 	tpl := template.Must(template.New("").Funcs(template.FuncMap{
 		"upper":   strings.ToUpper,
-		"icon":    areaIcon,
 		"favicon": favicon,
 		"since": func(t time.Time) string {
 			if t.IsZero() {
@@ -438,26 +437,6 @@ func (s *State) orderedAreas() []Area {
 		out = append(out, s.areas[k])
 	}
 	return out
-}
-
-// areaIcon is a text glyph, not an image: the page loads nothing external, and
-// an emoji costs no request.
-func areaIcon(key string) string {
-	switch key {
-	case "router":
-		return "🛜" // hut/router-ish
-	case "wifi":
-		return "📶"
-	case "dns":
-		return "🔍"
-	case "tls":
-		return "🔒"
-	case "devices":
-		return "🖥"
-	case "outside":
-		return "🌍"
-	}
-	return "•"
 }
 
 func contains(ss []string, s string) bool {
