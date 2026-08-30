@@ -74,31 +74,330 @@ device it was:
 Open it from any device on the network at `http://<sensor-ip>:8080` (set the
 address with `dashboard` under `[sensor]` in the config).
 
-## Quickstart
+## Installing
+
+Two parts, and the first one is useful on its own:
+
+1. **The sensor** — watches your network. Runs on a Raspberry Pi, a spare Linux
+   box, a Mac or a Windows machine.
+2. **The witness** *(optional)* — a small server somewhere else in the world that
+   looks at the same websites at the same moment, so its answers can be compared
+   with yours. Costs about $5 a month.
+
+Start with the sensor. Add the witness later if you want the extra check.
+
+### What you need
+
+| For | You need |
+|---|---|
+| Building | [Go](https://go.dev/dl/) 1.26 or newer. Nothing else — no C compiler, no libpcap, no system packages. |
+| The sensor | Any always-on computer plugged into your network. A Raspberry Pi is ideal. It must be **wired**, not on Wi-Fi, to see everything. |
+| The witness (optional) | A Linode account and about $5/month, or any small Linux server in a different country. |
+
+The sensor sees the parts of your network that everyone shares — so a Pi plugged
+into your router or a switch sees the whole house. Wi-Fi only shows that device's
+own traffic, which is why wired matters.
+
+### 1. Build it
 
 ```
+git clone https://github.com/sizzlorox/mitmwatch
+cd mitmwatch
 go build -o mitmwatch ./cmd/mitmwatch
-
-./mitmwatch doctor          # what is covered on this host, and what is not
-./mitmwatch check           # run every probe once; exit 1 if anything was found
-./mitmwatch sensor          # run continuously, alert as things are found
 ```
 
-On a Raspberry Pi, `make deploy PI_HOST=pi@host` cross-compiles, installs, and
-grants the one capability raw capture needs. A systemd unit for the resident
-sensor is in `docs/`.
+That produces one file called `mitmwatch`. There is nothing to install
+alongside it.
 
-The first run starts a ten-minute learning window for the network you are on.
-During it only critical findings surface; everything else is listed as held
-back, with the reason. A brand-new baseline disagrees with everything, and
-alerting on that is how a detector teaches people to ignore it.
+Check what it can see on this machine:
 
 ```
-./mitmwatch check tls truststore        # just these probes
-./mitmwatch baseline show               # what has been learned
-./mitmwatch baseline accept <hash>      # "this was me"
-./mitmwatch profiles list
-./mitmwatch profiles trust <key> work   # a managed laptop's private CA is expected
+./mitmwatch doctor
+```
+
+`doctor` prints what is covered here and what is not, and never changes
+anything. Run it any time you want to know where you stand.
+
+Then look at your network once:
+
+```
+./mitmwatch check
+```
+
+It exits `0` if everything looked fine and `1` if it found something, which is
+what makes it usable from a cron job later.
+
+**On the first run it will hold most findings back.** A brand-new install has no
+idea what your network normally looks like, so it spends ten minutes learning
+before it will raise anything but a critical finding. It lists what it held and
+why. This is deliberate — a detector that cries wolf on day one is one you will
+learn to ignore by day three.
+
+### 2. Put it on the Raspberry Pi
+
+From your development machine, with the Pi reachable over SSH:
+
+```
+make cross                          # builds for the Pi (linux/arm64)
+make deploy PI_HOST=pi@raspberrypi.local
+```
+
+`make deploy` copies the binary, installs it to `/usr/local/bin/mitmwatch`, and
+grants it the one permission it needs to read the network (`CAP_NET_RAW`). It
+does not run as root.
+
+Doing it by hand instead is three commands on the Pi:
+
+```
+sudo install -m 0755 mitmwatch /usr/local/bin/mitmwatch
+sudo setcap cap_net_raw,cap_net_admin+ep /usr/local/bin/mitmwatch
+sudo mkdir -p /etc/mitmwatch /var/lib/mitmwatch
+```
+
+If `setcap` is "not found", it lives in `/sbin` and your shell may not look
+there — use `/sbin/setcap`.
+
+### 3. Configure it
+
+Copy the example config to the place the sensor looks for it:
+
+```
+sudo cp mitmwatch.example.toml /etc/mitmwatch/mitmwatch.toml
+sudo nano /etc/mitmwatch/mitmwatch.toml
+```
+
+Every setting has a default that works, so you only need to change two things to
+start:
+
+```toml
+[sensor]
+role      = "always-on"      # "roaming" for a laptop that sleeps
+dashboard = ":8080"          # turns on the status page
+
+[alerts]
+sinks = ["log", "ntfy"]
+ntfy_topic = "https://ntfy.sh/pick-something-nobody-can-guess"
+```
+
+**About that topic name.** [ntfy](https://ntfy.sh) is how the sensor reaches your
+phone. It needs no account and no signup: you invent a name, install the ntfy
+app, and subscribe to that name. Anyone who guesses the name can read your
+alerts, so pick something long and unguessable — not `home` or `mitmwatch`.
+
+Without a push sink the sensor still records everything, but nothing will tell
+you. That matters most at 3am, which is the point of the whole exercise.
+
+Other files live at:
+
+| | |
+|---|---|
+| Config, when running as root | `/etc/mitmwatch/mitmwatch.toml` |
+| Config, as a normal user | your user config directory — `mitmwatch doctor` prints the exact path |
+| Learned baselines and history | `/var/lib/mitmwatch/` as root, per-user otherwise |
+
+Worth knowing, because it surprises people: **`mitmwatch check` and
+`sudo mitmwatch check` read different config files and different baselines.**
+The service runs as root, so when you are checking on the service, use `sudo`.
+`doctor` always prints which files it actually used.
+
+### 4. Run it for good
+
+Install the service unit that ships in `docs/`:
+
+```
+sudo cp docs/mitmwatch-sensor.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mitmwatch-sensor
+```
+
+Check it came up:
+
+```
+systemctl status mitmwatch-sensor
+journalctl -u mitmwatch-sensor -f      # watch it work; Ctrl-C to stop watching
+```
+
+Then open the dashboard from any device on your network:
+
+```
+http://<the-pi's-address>:8080
+```
+
+It should say **All clear**, or tell you it is still learning. That is the whole
+setup for the sensor.
+
+### 5. The witness, if you want it (optional)
+
+Everything above works without this. The witness adds one thing the sensor can
+never do alone: a second opinion from outside your network. If someone between
+you and the internet is swapping certificates, your sensor and a machine on
+another continent will not see the same thing — and that disagreement is very
+hard for an attacker to arrange.
+
+It has to be somewhere **else**. A server sharing your internet connection
+corroborates whatever your connection is already doing, which is worth nothing.
+
+**Create the server.** There is a recipe in `infra/` that builds and hardens it
+for you using [OpenTofu](https://opentofu.org/):
+
+```
+ssh-keygen -t ed25519          # skip if you already have a key
+cp infra/.env.example infra/.env
+nano infra/.env                # paste a Linode API token; the file is gitignored
+infra/tofu.sh init
+infra/tofu.sh apply
+```
+
+You will need a Linode API token with **Linodes: Read/Write** and **Firewalls:
+Read/Write**, made at cloud.linode.com under API Tokens. It does not need
+anything else.
+
+The SSH key matters: the server is built with password login disabled, so
+without a key there is no way in except Linode's browser console.
+
+Prefer to use a server you already have? Anything running Debian works. Copy the
+binary to it and skip to the pairing step.
+
+**Install the same binary there:**
+
+```
+make cross-amd64
+make deploy-witness WITNESS_HOST=user@your-server
+```
+
+**Introduce the two machines.** They authenticate each other by key — no
+passwords, no certificate authority, so there is nothing to mis-issue. The
+introduction goes in this order, because each side has to learn the other's key
+before it will talk at all.
+
+*On the sensor,* ask for its own key:
+
+```
+sudo mitmwatch witness pair --addr your-server:8443
+```
+
+It prints `this sensor's pin: sha256/...` and then fails to connect, because
+nothing is listening on the witness yet. That is expected — you ran it for the
+pin. Copy that line.
+
+*On the witness,* create its config and register the sensor's key:
+
+```
+sudo mkdir -p /etc/mitmwatch /var/lib/mitmwatch
+sudo mitmwatch witness allow sha256/<the-sensor-pin-you-copied>
+```
+
+Like `pair`, `allow` **prints** a block rather than editing anything. Write the
+config out with what it printed:
+
+```toml
+[witness]
+listen     = ":8443"
+allow_pins = [
+  "sha256/...",          # exactly what `witness allow` printed
+]
+```
+
+The witness refuses to start with an empty `allow_pins` — a witness that accepts
+anyone is not a witness. Now start it:
+
+```
+sudo cp docs/mitmwatch-witness.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mitmwatch-witness
+```
+
+**Let the sensor in.** The witness's firewall starts closed. Put the addresses
+your home connection uses into `infra/.env` and apply:
+
+```
+TF_VAR_witness_port_open=true
+TF_VAR_witness_allow_cidrs=["203.0.113.0/24"]
+```
+
+```
+infra/tofu.sh apply
+```
+
+To find the right value, run this on the sensor and use the `inetnum` range it
+prints:
+
+```
+whois "$(curl -s https://api.ipify.org)" | grep -iE '^(inetnum|netname)'
+```
+
+Use the whole range, not your single current address. Home connections get a new
+address every so often, and a rule pinned to one address locks the sensor out of
+its own witness the moment that happens — quietly, while everything else keeps
+working. Keep real values in `infra/.env`; it is gitignored so they never reach
+a public repository.
+
+**Finish the introduction.** Back on the sensor, run `pair` again. This time the
+witness is listening and reachable, so it completes:
+
+```
+sudo mitmwatch witness pair --addr your-server:8443
+```
+
+It verifies the link and prints a `[witness]` block. Paste that into the
+sensor's `/etc/mitmwatch/mitmwatch.toml`:
+
+```toml
+[witness]
+sync = true
+addr = "your-server:8443"
+pin  = "sha256/..."          # exactly what `witness pair` printed
+```
+
+Restart the sensor so it picks it up:
+
+```
+sudo systemctl restart mitmwatch-sensor
+```
+
+**Confirm it worked.** The dashboard's left rail should read
+`outside — connected`. Or ask directly:
+
+```
+mitmwatch witness status
+```
+
+### Checking it actually works
+
+```
+mitmwatch doctor            # what is covered here, and what is not
+mitmwatch check             # look once, now
+mitmwatch baseline show     # what it has learned about this network
+mitmwatch profiles list     # every network it has seen
+```
+
+If something fires and you know it was you — a work laptop's corporate
+certificate, a second router you added — tell it so and it stops asking:
+
+```
+mitmwatch baseline accept <hash>          # the hash is printed with the finding
+mitmwatch profiles trust <key> work       # a managed laptop's private CA is expected here
+```
+
+### When something is wrong
+
+| Symptom | Cause |
+|---|---|
+| `doctor` says capture is "device tables" instead of "the wire" | The capability is missing. Re-run `sudo setcap cap_net_raw,cap_net_admin+ep /usr/local/bin/mitmwatch`. |
+| Dashboard will not open from another device | `dashboard` is set to `127.0.0.1:8080`, which is this machine only. Use `:8080`. |
+| Everything is "held back while learning" | Normal for the first ten minutes on a network it has not seen. |
+| `journalctl` prints nothing at all | Your user is not in the `adm` group. `sudo journalctl -u mitmwatch-sensor`. |
+| The dashboard says the outside check is down | Usually the witness firewall no longer covers your address — see the range advice above. |
+| It sees very few devices | The sensor is on Wi-Fi, or on a switch port that does not carry other devices' traffic. Wire it to the router. |
+
+## Day to day
+
+```
+mitmwatch check tls truststore        # just these probes
+mitmwatch baseline show               # what has been learned
+mitmwatch baseline accept <hash>      # "this was me"
+mitmwatch profiles list
+mitmwatch profiles trust <key> work   # a managed laptop's private CA is expected
 ```
 
 ## The idea
@@ -225,13 +524,6 @@ The published digest travels over the same connection as the bundle, so this
 check is worth less than it looks when run from a host that is itself
 intercepted. `doctor` prints the digest; compare it against
 `curl.se/ca/cacert.pem.sha256` from a machine you know is clean.
-
-## Building for a Raspberry Pi
-
-```
-make cross                       # linux/arm64, static, no cgo
-make deploy PI_HOST=pi@host      # installs and grants CAP_NET_RAW for phase 1
-```
 
 ## Layout
 
