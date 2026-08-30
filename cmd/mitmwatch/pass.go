@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/sizzlorox/mitmwatch/internal/capture"
 	"github.com/sizzlorox/mitmwatch/internal/frame"
@@ -12,9 +13,26 @@ import (
 )
 
 // frameBuffer is how far behind one capture-fed probe may fall before it starts
-// losing frames. Generous on purpose: the cost is memory measured in kilobytes,
-// and the cost of the alternative is missed evidence.
-const frameBuffer = 2048
+// losing frames, and it has to scale with the listening window: a fixed 2048
+// was two minutes of headroom at a five-second window and about one minute at
+// ninety, which is how a longer window would have turned into more dropped
+// frames rather than more evidence.
+//
+// Sized from the busiest thing measured on a real segment - roughly twenty
+// multicast and ARP frames a second - with a floor for short windows and a cap
+// so a misconfigured window cannot allocate without bound. The cost is memory
+// measured in megabytes; the cost of the alternative is missed evidence.
+func frameBuffer(window time.Duration) int {
+	const perSecond = 40
+	n := int(window.Seconds()) * perSecond
+	if n < 2048 {
+		return 2048
+	}
+	if n > 16384 {
+		return 16384
+	}
+	return n
+}
 
 // pass runs each probe once and returns the findings, updating the baseline
 // where it is safe to do so.
@@ -63,7 +81,7 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 		fan = capture.NewFanout(src.Frames())
 		for _, p := range probes {
 			if probe.WantsFrames(p) {
-				streams[p.Name()] = fan.Subscribe(p.Name(), frameBuffer)
+				streams[p.Name()] = fan.Subscribe(p.Name(), frameBuffer(e.captureWindow))
 			}
 		}
 	}
@@ -90,7 +108,7 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 			base := baselines[p.Name()]
 			snap, err := p.Observe(ctx, probe.Inputs{
 				Frames:        streams[p.Name()],
-				CaptureWindow: e.cfg.CaptureWindow(),
+				CaptureWindow: e.captureWindow,
 				Baseline:      base,
 				Network:       e.net,
 				Config:        e.cfg,

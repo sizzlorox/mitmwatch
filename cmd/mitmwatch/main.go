@@ -140,6 +140,12 @@ type env struct {
 	fresh   bool
 	dash    *webState
 
+	// captureWindow is how long one pass listens on the wire. It is on env
+	// rather than read from config at the point of use because the two commands
+	// want different answers: `check` samples for a few seconds and returns,
+	// while the resident sensor should be listening almost continuously.
+	captureWindow time.Duration
+
 	// recent holds each probe's most recent findings, so the sensor can
 	// evaluate the whole world every cycle rather than only the probes that
 	// were due. erroredThisPass records which probes failed this cycle, so a
@@ -233,7 +239,10 @@ func setup(ctx context.Context, cfgPath, profileDir string) (*env, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &env{cfg: cfg, store: store, net: n, netErr: netErr, profile: prof, fresh: fresh, firstDeliver: true}, nil
+	return &env{
+		cfg: cfg, store: store, net: n, netErr: netErr, profile: prof, fresh: fresh,
+		firstDeliver: true, captureWindow: cfg.CaptureWindow(),
+	}, nil
 }
 
 // witnessView returns the current cross-vantage view, or a zero (unconfigured)

@@ -82,10 +82,15 @@ func cmdSensor(ctx context.Context, args []string) error {
 		tick = shortestInterval(probes)
 	}
 
+	// What the daemon is actually for. `check` samples a few seconds and
+	// returns; the resident sensor should be listening almost all the time, or
+	// "between windows" is where every one-shot event happens.
+	e.captureWindow = sensorWindow(tick, e.cfg.CaptureWindow())
+
 	fmt.Printf("mitmwatch sensor %s\n", version)
 	fmt.Printf("  network   %s (profile %s, trust %s)\n", e.net.Label(), e.profile.Key, e.profile.Trust)
 	fmt.Printf("  probes    %d, cycle every %s\n", len(probes), tick)
-	fmt.Printf("  listening %s per cycle\n", e.cfg.CaptureWindow())
+	fmt.Printf("  listening %s of every %s\n", e.captureWindow, tick)
 	fmt.Printf("  sinks     %s\n", sinkNames(e))
 	if e.cfg.Sensor.Dashboard != "" {
 		fmt.Printf("  dashboard http://%s\n", dashboardHost(e.cfg.Sensor.Dashboard))
@@ -151,13 +156,51 @@ func cmdSensor(ctx context.Context, args []string) error {
 			return nil
 		}
 
-		select {
-		case <-ctx.Done():
+		// Sleep what is LEFT of the tick, not a whole one. Sleeping a full tick
+		// after the cycle made the real period pass+tick, which was invisible
+		// while a pass took five seconds and would throw away most of the
+		// benefit now that a pass takes most of the interval.
+		if wait := tick - time.Since(now); wait > 0 {
+			select {
+			case <-ctx.Done():
+				fmt.Println("\nstopping")
+				return e.store.Save(e.profile)
+			case <-time.After(wait):
+			}
+		} else if ctx.Err() != nil {
 			fmt.Println("\nstopping")
 			return e.store.Save(e.profile)
-		case <-time.After(tick):
 		}
 	}
+}
+
+// sensorWindow is how long the resident sensor listens each cycle.
+//
+// The one-shot `check` samples for a few seconds because it has to return to a
+// person. A daemon has no such excuse, and the difference is the whole point of
+// running one: ARP poisoning repeats about once a second so a short sample
+// catches it, but a single rogue DHCP offer, one router advertisement or one
+// poisoned name lookup happens once - and five seconds in every two minutes
+// misses those about ninety-six times out of a hundred.
+//
+// So listen for nearly the whole cycle, leaving headroom for the probes that do
+// not read the wire - the TLS handshakes and DoH lookups - to finish inside the
+// same pass, and for the profile write at the end of it. Never shorter than the
+// configured one-shot window, and capped so an unusually long interval cannot
+// hold one capture socket open for an hour.
+func sensorWindow(tick, floor time.Duration) time.Duration {
+	const (
+		headroom = 30 * time.Second
+		ceiling  = 5 * time.Minute
+	)
+	w := tick - headroom
+	if w < floor {
+		w = floor
+	}
+	if w > ceiling {
+		w = ceiling
+	}
+	return w
 }
 
 // mergeFindings maintains the union of every probe's most recent findings.
