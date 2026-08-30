@@ -103,6 +103,10 @@ type afPacket struct {
 
 	closeOnce sync.Once
 	done      chan struct{}
+
+	// limit describes a capture that opened but cannot see everything, empty
+	// when there is nothing to report.
+	limit string
 }
 
 func openAFPacket(iface string) (*afPacket, error) {
@@ -136,6 +140,26 @@ func openAFPacket(iface string) (*afPacket, error) {
 		return nil, fmt.Errorf("bind %s: %w", iface, err)
 	}
 
+	// Ask the interface for every multicast group, or half the name-resolution
+	// probe is watching a wire it cannot hear.
+	//
+	// A NIC that is neither promiscuous nor allmulti delivers only the groups
+	// something on the host has joined. On a normal sensor that is 224.0.0.251
+	// and ff02::fb, because avahi joined them - and nothing joins LLMNR's
+	// 224.0.0.252 or ff02::1:3, because nothing on a Linux box speaks LLMNR.
+	// So the hardware filter drops every LLMNR frame before the socket sees it,
+	// and nameresprobe reports Captured with no answers: "no LLMNR poisoning
+	// here", when it never listened. Measured on the deployed sensor - eight
+	// LLMNR queries put on the segment, 519 mDNS frames captured in the same
+	// window, zero LLMNR. LLMNR is the protocol Responder leans on hardest.
+	//
+	// ALLMULTI, not PROMISC. It is the narrowest thing that fixes it: the
+	// socket wants multicast it is not a member of, not unicast addressed to
+	// other machines. A detector should not quietly start reading its
+	// neighbours' traffic to fix its own blind spot.
+	mreq := unix.PacketMreq{Ifindex: int32(ifi.Index), Type: unix.PACKET_MR_ALLMULTI}
+	allmultiErr := unix.SetsockoptPacketMreq(fd, unix.SOL_PACKET, unix.PACKET_ADD_MEMBERSHIP, &mreq)
+
 	// A read deadline is what lets Close actually stop the reader instead of
 	// leaving it blocked in recvfrom until the next frame arrives - which on a
 	// quiet segment can be minutes.
@@ -150,6 +174,14 @@ func openAFPacket(iface string) (*afPacket, error) {
 		iface: iface,
 		ch:    make(chan frame.Frame, 256),
 		done:  make(chan struct{}),
+	}
+	if allmultiErr != nil {
+		// Not fatal - ARP, DHCP and the groups the host already joined still
+		// arrive, so capture is worth having. But the probe that reads LLMNR is
+		// now looking at a wire it cannot fully hear, and that has to be said
+		// rather than left to look like a quiet network.
+		a.limit = fmt.Sprintf("multicast is filtered by the interface: could not set ALLMULTI on %s (%v), "+
+			"so LLMNR and any other group nothing on this host has joined will not be seen", iface, allmultiErr)
 	}
 	go a.read()
 	return a, nil
@@ -199,7 +231,7 @@ func (a *afPacket) read() {
 }
 
 func (a *afPacket) Tier() Tier                 { return Tier2Raw }
-func (a *afPacket) Reason() string             { return "" }
+func (a *afPacket) Reason() string             { return a.limit }
 func (a *afPacket) Iface() string              { return a.iface }
 func (a *afPacket) Frames() <-chan frame.Frame { return a.ch }
 

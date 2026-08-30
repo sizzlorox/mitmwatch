@@ -140,6 +140,13 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 	// Frames the sensor never saw are frames it cannot report on, and a source
 	// that died mid-pass looks exactly like a quiet network.
 	if src != nil {
+		// A source that opened but cannot see everything is not a healthy one.
+		// Saying so every pass is deliberate: it names a blind spot that a
+		// human has to fix, and the alternative is a probe quietly reporting
+		// that it found nothing on a protocol it never received.
+		if r := src.Reason(); r != "" {
+			errs = append(errs, fmt.Errorf("capture on %s is incomplete: %s", src.Iface(), r))
+		}
 		if err := src.Err(); err != nil {
 			errs = append(errs, fmt.Errorf("capture on %s failed mid-pass: %w", src.Iface(), err))
 			// A source that died mid-pass fed its subscribers a closed channel,
