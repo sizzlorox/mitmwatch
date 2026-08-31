@@ -41,7 +41,7 @@ window_min = 10              # A brand-new network disagrees with everything. Fo
 [tls]
 # Hosts to inspect. Pick ones you actually use, run by different companies -
 # the shared-key check needs more than one operator to be conclusive.
-pin = ["github.com", "www.google.com", "cloudflare-dns.com", "registry.npmjs.org", "viverse.com"]
+pin = ["github.com", "www.google.com", "cloudflare-dns.com", "registry.npmjs.org"]
 
 # Leave false until a witness exists. Learning issuers from a local first
 # observation on an already-intercepted machine would enrol the interceptor as

@@ -173,7 +173,7 @@ func Defaults() *Config {
 	return &Config{
 		Sensor: Sensor{Role: "roaming", Capture: "auto"},
 		TLS: TLS{
-			Pin:           []string{"github.com", "www.google.com", "cloudflare-dns.com", "registry.npmjs.org", "viverse.com"},
+			Pin:           []string{"github.com", "www.google.com", "cloudflare-dns.com", "registry.npmjs.org"},
 			LearnIssuers:  false,
 			ExpectIssuers: map[string]string{},
 			TimeoutSec:    10,

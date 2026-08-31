@@ -27,8 +27,6 @@ func TestCAAPinListIsSilent(t *testing.T) {
 		// registry.npmjs.org: Google Trust Services; npmjs.org authorises pki.goog.
 		{"registry.npmjs.org", "Google Trust Services",
 			[]string{"comodoca.com", "digicert.com", "letsencrypt.org", "pki.goog", "ssl.com"}, true},
-		// viverse.com: DigiCert, and no CAA anywhere in its tree.
-		{"viverse.com", "DigiCert Inc", nil, false},
 	}
 	for _, c := range cases {
 		if v := evalCAA(c.issuerO, c.authorized, c.present); v != caaSilent {
@@ -108,7 +106,6 @@ func TestCAALiveNoFalsePositive(t *testing.T) {
 		"www.google.com":     "Google Trust Services",
 		"cloudflare-dns.com": "SSL Corp",
 		"registry.npmjs.org": "Google Trust Services",
-		"viverse.com":        "DigiCert Inc",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
