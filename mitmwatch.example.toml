@@ -25,6 +25,7 @@ capture_window_sec = 5
 # a self-signed certificate would train the household to click through the exact
 # warning this tool exists to make them heed.
 #dashboard = ":8080"
+#audit = true                     # filterable device findings and inside/outside check timings
 
 # Active device discovery. Off by default: detection is passive. When on, each
 # pass nudges every host on the local subnet so quiet devices (smart plugs,

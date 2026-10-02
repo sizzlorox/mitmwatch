@@ -165,18 +165,25 @@ type env struct {
 	firstDeliver bool
 
 	// Dashboard read-model state, maintained across cycles by the sensor.
-	tier        string               // friendly capture-tier label ("the wire" / "device tables")
-	since       time.Time            // when this sensor process started, for uptime
-	lastCycle   time.Time            // when the last completed cycle stamped its sightings
-	events      []baseline.Event     // bounded activity log, oldest first, persisted
-	eventsTotal int                  // how many entries the log holds in all
-	eventsDirty bool                 // the log changed and needs writing
-	alerted     map[string]raised    // targets currently in an actionable alert, for raise/clear
-	heldSeen    map[string]bool      // targets currently held back, so each is logged once
-	sawLearning bool                 // observed the learning window while it was open
-	learnedOnce bool                 // emitted the "finished learning" event already
-	witnessUp   bool                 // last witness-link state, for connect/disconnect events
-	nameCache   map[string]nameEntry // reverse-DNS device names, cached
+	tier        string                // friendly capture-tier label ("the wire" / "device tables")
+	since       time.Time             // when this sensor process started, for uptime
+	lastCycle   time.Time             // when the last completed cycle stamped its sightings
+	events      []baseline.Event      // bounded activity log, oldest first, persisted
+	eventsTotal int                   // how many entries the log holds in all
+	eventsDirty bool                  // the log changed and needs writing
+	alerted     map[string]raised     // targets currently in an actionable alert, for raise/clear
+	heldSeen    map[string]bool       // targets currently held back, so each is logged once
+	sawLearning bool                  // observed the learning window while it was open
+	learnedOnce bool                  // emitted the "finished learning" event already
+	witnessUp   bool                  // last witness-link state, for connect/disconnect events
+	nameCache   map[string]nameEntry  // reverse-DNS device names, cached
+	checks      map[string]auditCheck // most recent completed local checks
+}
+
+type auditCheck struct {
+	duration time.Duration
+	status   string
+	when     time.Time
 }
 
 // recentFindings is one probe's last output with an expiry.

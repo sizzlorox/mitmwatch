@@ -50,6 +50,9 @@ type State struct {
 	events      []Event
 	eventsTotal int
 	devicesAt   time.Time
+	audit       bool
+	checks      []CheckTiming
+	findings    []AuditFinding
 }
 
 // WitnessCard is the live health of the outside vantage point, for the facts
@@ -116,6 +119,28 @@ type Device struct {
 	Addrs  []string
 }
 
+// CheckTiming is the duration of one detector's most recent observation.
+type CheckTiming struct {
+	Vantage  string
+	Check    string
+	Duration time.Duration
+	Status   string
+	When     time.Time
+}
+
+// AuditFinding is one current finding labelled with the vantage that produced
+// it and the device it concerns.
+type AuditFinding struct {
+	Device   string
+	Target   string
+	Vantage  string
+	Check    string
+	Severity string
+	Title    string
+	Held     bool
+	Evidence map[string]string
+}
+
 // NewState returns an empty state that renders as "starting up" rather than
 // blank.
 func NewState() *State {
@@ -140,6 +165,9 @@ func (s *State) Update(u Update) {
 	s.events = u.Events
 	s.eventsTotal = u.EventsTotal
 	s.devicesAt = u.DevicesAt
+	s.audit = u.AuditEnabled
+	s.checks = u.Checks
+	s.findings = u.Findings
 	s.areas = map[string]Area{}
 	for _, a := range u.Areas {
 		s.areas[a.Key] = a
@@ -171,7 +199,10 @@ type Update struct {
 	// runs and manages to observe, so a page that showed only the cycle time
 	// would report devices as connected now on the strength of a reading it
 	// never took.
-	DevicesAt time.Time
+	DevicesAt    time.Time
+	AuditEnabled bool
+	Checks       []CheckTiming
+	Findings     []AuditFinding
 }
 
 // overall is the one-sentence, one-colour verdict at the top of the page.
@@ -240,6 +271,18 @@ func Handler(s *State) http.Handler {
 		"at":    at,
 		"clock": clock,
 		"sub":   func(a, b int) int { return a - b },
+		"duration": func(d time.Duration) string {
+			switch {
+			case d < time.Microsecond:
+				return fmt.Sprintf("%dns", d.Nanoseconds())
+			case d < time.Millisecond:
+				return fmt.Sprintf("%.1fµs", float64(d)/float64(time.Microsecond))
+			case d < time.Second:
+				return fmt.Sprintf("%.1fms", float64(d)/float64(time.Millisecond))
+			default:
+				return d.Round(100 * time.Millisecond).String()
+			}
+		},
 	}).ParseFS(files, "templates/*.html"))
 
 	mux := http.NewServeMux()
@@ -295,6 +338,7 @@ func Handler(s *State) http.Handler {
 				DeviceList: s.devices, Events: recentEvents(s.events),
 				EventsTotal: s.eventsTotal, EventsKept: len(s.events),
 				EventsShown: len(recentEvents(s.events)), DevicesAt: s.devicesAt,
+				AuditEnabled: s.audit, AuditSummary: auditSummary(s.checks),
 			}
 		})
 	})
@@ -318,6 +362,42 @@ func Handler(s *State) http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/audit", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		enabled := s.audit
+		s.mu.RUnlock()
+		if !enabled {
+			http.NotFound(w, r)
+			return
+		}
+		render(w, "audit.html", func() any {
+			selected := r.URL.Query().Get("device")
+			events := reversed(s.events)
+			findings := s.findings
+			if selected != "" {
+				filteredEvents := make([]Event, 0, len(events))
+				for _, ev := range events {
+					if ev.Device == selected {
+						filteredEvents = append(filteredEvents, ev)
+					}
+				}
+				events = filteredEvents
+				filteredFindings := make([]AuditFinding, 0, len(findings))
+				for _, finding := range findings {
+					if finding.Device == selected {
+						filteredFindings = append(filteredFindings, finding)
+					}
+				}
+				findings = filteredFindings
+			}
+			return auditData{
+				Network: s.network, Checks: s.checks, Findings: findings,
+				Events: events, Devices: auditDevices(s.events, s.findings),
+				Selected: selected, Witness: s.witness,
+			}
+		})
+	})
+
 	// A machine-readable mirror, for anyone who wants to build on it.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.RLock()
@@ -333,24 +413,26 @@ func Handler(s *State) http.Handler {
 }
 
 type homeData struct {
-	State       string
-	Sentence    string
-	Network     string
-	Trust       string
-	LastCheck   time.Time
-	Areas       []Area
-	Alerts      []alertView
-	Held        int
-	Devices     int
-	Tier        string
-	Witness     WitnessCard
-	Uptime      string
-	DeviceList  []Device
-	Events      []Event
-	EventsTotal int
-	EventsKept  int
-	EventsShown int
-	DevicesAt   time.Time
+	State        string
+	Sentence     string
+	Network      string
+	Trust        string
+	LastCheck    time.Time
+	Areas        []Area
+	Alerts       []alertView
+	Held         int
+	Devices      int
+	Tier         string
+	Witness      WitnessCard
+	Uptime       string
+	DeviceList   []Device
+	Events       []Event
+	EventsTotal  int
+	EventsKept   int
+	EventsShown  int
+	DevicesAt    time.Time
+	AuditEnabled bool
+	AuditSummary string
 }
 
 type devicesData struct {
@@ -363,6 +445,16 @@ type activityData struct {
 	Events  []Event
 	Total   int
 	Kept    int
+}
+
+type auditData struct {
+	Network  string
+	Checks   []CheckTiming
+	Findings []AuditFinding
+	Events   []Event
+	Devices  []string
+	Selected string
+	Witness  WitnessCard
 }
 
 type alertView struct {
@@ -525,5 +617,58 @@ func reversed(evs []Event) []Event {
 	for i := len(evs) - 1; i >= 0; i-- {
 		out = append(out, evs[i])
 	}
+	return out
+}
+
+func auditSummary(checks []CheckTiming) string {
+	slowest := map[string]CheckTiming{}
+	for _, check := range checks {
+		if check.Duration <= 0 {
+			continue
+		}
+		old, ok := slowest[check.Vantage]
+		if !ok || check.Duration > old.Duration {
+			slowest[check.Vantage] = check
+		}
+	}
+	var parts []string
+	for _, vantage := range []string{"Inside", "Outside"} {
+		if check, ok := slowest[vantage]; ok {
+			parts = append(parts, fmt.Sprintf("%s slowest: %s %s", vantage, check.Check, shortDuration(check.Duration)))
+		}
+	}
+	if len(parts) == 0 {
+		return "Waiting for check timings"
+	}
+	return strings.Join(parts, " · ")
+}
+
+func shortDuration(d time.Duration) string {
+	switch {
+	case d < time.Millisecond:
+		return fmt.Sprintf("%.1fµs", float64(d)/float64(time.Microsecond))
+	case d < time.Second:
+		return fmt.Sprintf("%.1fms", float64(d)/float64(time.Millisecond))
+	default:
+		return d.Round(100 * time.Millisecond).String()
+	}
+}
+
+func auditDevices(events []Event, findings []AuditFinding) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(device string) {
+		if device != "" && !seen[device] {
+			seen[device] = true
+			out = append(out, device)
+		}
+	}
+	for _, ev := range events {
+		add(ev.Device)
+	}
+	for _, finding := range findings {
+		add(finding.Device)
+	}
+	sort.Strings(out)
 	return out
 }

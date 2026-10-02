@@ -224,6 +224,8 @@
   .pfoot{display:flex;align-items:center;flex-wrap:wrap;gap:2px 8px;
     min-height:40px;padding:6px 0;
     font-size:11px;color:var(--dim);border-top:1px solid var(--edge)}
+  .audit-widget{display:flex;flex-wrap:wrap;gap:2px 8px;flex:1 1 100%}
+  .audit-widget a{color:var(--learn);font-weight:600}
 
   table.dev{width:100%;border-collapse:collapse;font-size:13px}
   /* The sticky header paints --bg, not --card: the panes have no card surface
@@ -400,6 +402,7 @@
       </ul>
       {{else}}<div class="pbody"><div class="clear">Nothing recorded on this network yet.</div></div>{{end}}
       <div class="pfoot">
+        {{if .AuditEnabled}}<div class="audit-widget"><a href="/audit">Device audit</a><span>{{.AuditSummary}}</span></div>{{end}}
         {{if gt .EventsKept .EventsShown}}<a href="/activity">The other {{sub .EventsKept .EventsShown}}, with what was seen</a>
         {{else}}<a href="/activity">Full log, with what was seen</a>{{end}}
         {{if gt .EventsTotal .EventsKept}}<span class="dim">&middot; {{.EventsTotal}} recorded in all, the oldest are not kept</span>{{end}}

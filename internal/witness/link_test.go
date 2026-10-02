@@ -128,3 +128,37 @@ func TestStaleViewBecomesUnavailable(t *testing.T) {
 		t.Fatal("a stale view stayed available; freshness not enforced on the sensor clock")
 	}
 }
+
+func TestCheckTimesDecodesPositiveDurations(t *testing.T) {
+	got := checkTimes(map[string]int64{
+		"tls": int64(125 * time.Millisecond), "dns": 0, "bad": -1, "unknown": int64(time.Second),
+	})
+	if got["tls"] != 125*time.Millisecond {
+		t.Fatalf("TLS check time = %s, want 125ms", got["tls"])
+	}
+
+	if _, ok := got["dns"]; ok {
+		t.Error("zero duration should not be shown as a completed timing")
+	}
+	if _, ok := got["bad"]; ok {
+		t.Error("negative duration should not be shown as a completed timing")
+	}
+	if _, ok := got["unknown"]; ok {
+		t.Error("unrecognized witness check should not be displayed")
+	}
+}
+
+func TestCheckStatusesOnlyAllowsKnownResults(t *testing.T) {
+	got := checkStatuses(map[string]string{
+		"tls": "complete", "dns": "unavailable", "arp": "complete", "other": "lying",
+	})
+	if got["tls"] != "complete" || got["dns"] != "unavailable" {
+		t.Fatalf("known check statuses not preserved: %#v", got)
+	}
+	if _, ok := got["arp"]; ok {
+		t.Error("unknown check was included")
+	}
+	if _, ok := got["other"]; ok {
+		t.Error("unknown status was included")
+	}
+}

@@ -49,6 +49,9 @@ func TestMissingFileIsNotAnError(t *testing.T) {
 	if len(c.TLS.Pin) == 0 {
 		t.Error("defaults did not populate the pin list")
 	}
+	if !c.Sensor.Audit {
+		t.Error("audit should be enabled by default")
+	}
 }
 
 func TestPartialFileKeepsDefaults(t *testing.T) {
@@ -66,5 +69,22 @@ func TestPartialFileKeepsDefaults(t *testing.T) {
 	}
 	if len(c.DNS.DoH) == 0 {
 		t.Error("setting one key wiped the defaults for another section")
+	}
+	if !c.Sensor.Audit {
+		t.Error("omitting sensor.audit should preserve its enabled default")
+	}
+}
+
+func TestAuditCanBeDisabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mitmwatch.toml")
+	if err := os.WriteFile(path, []byte("[sensor]\naudit = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sensor.Audit {
+		t.Error("sensor.audit=false did not disable the audit feature")
 	}
 }
