@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -211,9 +212,13 @@ func dashboardChecks(local map[string]auditCheck, outside probe.WitnessView) []w
 	}
 	sort.Strings(names)
 	for _, name := range names {
+		status := outside.CheckStatus[name]
+		if status == "" {
+			status = "complete"
+		}
 		checks = append(checks, web.CheckTiming{
 			Vantage: "Outside", Check: name, Duration: outside.CheckTimes[name],
-			Status: "complete", When: outside.ObservedAt,
+			Status: status, When: outside.ObservedAt,
 		})
 	}
 	return checks

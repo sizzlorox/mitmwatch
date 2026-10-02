@@ -225,8 +225,9 @@ type WitnessView struct {
 	Err string
 	// ObservedAt is the witness's own timestamp - human-readable evidence only,
 	// never a correctness input.
-	ObservedAt time.Time
-	CheckTimes map[string]time.Duration
+	ObservedAt  time.Time
+	CheckTimes  map[string]time.Duration
+	CheckStatus map[string]string
 
 	snap   map[string]Snapshot
 	stable map[string]bool
@@ -245,6 +246,12 @@ func NewWitnessView(configured, available, reportDown bool, errStr string, obser
 		v.CheckTimes = checkTimes[0]
 	}
 	return v
+}
+
+// WithCheckStatus attaches the outside observation results for the audit view.
+func (w WitnessView) WithCheckStatus(status map[string]string) WitnessView {
+	w.CheckStatus = status
+	return w
 }
 
 // Snapshot returns the witness's snapshot for a probe, and whether it is usable

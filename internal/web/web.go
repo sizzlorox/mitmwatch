@@ -199,7 +199,7 @@ type Update struct {
 	// runs and manages to observe, so a page that showed only the cycle time
 	// would report devices as connected now on the strength of a reading it
 	// never took.
-	DevicesAt time.Time
+	DevicesAt    time.Time
 	AuditEnabled bool
 	Checks       []CheckTiming
 	Findings     []AuditFinding
@@ -413,24 +413,24 @@ func Handler(s *State) http.Handler {
 }
 
 type homeData struct {
-	State       string
-	Sentence    string
-	Network     string
-	Trust       string
-	LastCheck   time.Time
-	Areas       []Area
-	Alerts      []alertView
-	Held        int
-	Devices     int
-	Tier        string
-	Witness     WitnessCard
-	Uptime      string
-	DeviceList  []Device
-	Events      []Event
-	EventsTotal int
-	EventsKept  int
-	EventsShown int
-	DevicesAt   time.Time
+	State        string
+	Sentence     string
+	Network      string
+	Trust        string
+	LastCheck    time.Time
+	Areas        []Area
+	Alerts       []alertView
+	Held         int
+	Devices      int
+	Tier         string
+	Witness      WitnessCard
+	Uptime       string
+	DeviceList   []Device
+	Events       []Event
+	EventsTotal  int
+	EventsKept   int
+	EventsShown  int
+	DevicesAt    time.Time
 	AuditEnabled bool
 	AuditSummary string
 }

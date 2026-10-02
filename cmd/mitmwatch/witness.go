@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
-	"time"
 
 	"github.com/sizzlorox/mitmwatch/internal/config"
 	"github.com/sizzlorox/mitmwatch/internal/core/alert"
@@ -66,21 +65,22 @@ func witnessObserver(cfg *config.Config) witness.Observer {
 		if p, ok := probe.Get("tls"); ok {
 			start := time.Now()
 			s, err := p.Observe(ctx, probe.Inputs{Config: cfg})
+			s.Duration = time.Since(start)
 			if err == nil {
-				if cfg.Sensor.Audit {
-					s.Duration = time.Since(start)
-				}
 				snaps["tls"] = s
 				facts = tlsFactsFrom(s)
+			} else {
+				snaps["tls"] = probe.Snapshot{Probe: "tls", Duration: s.Duration, Err: err.Error()}
 			}
 		}
 		if p, ok := probe.Get("dns"); ok {
 			start := time.Now()
-			if s, err := p.Observe(ctx, probe.Inputs{Config: cfg}); err == nil {
-				if cfg.Sensor.Audit {
-					s.Duration = time.Since(start)
-				}
+			s, err := p.Observe(ctx, probe.Inputs{Config: cfg})
+			s.Duration = time.Since(start)
+			if err == nil {
 				snaps["dns"] = s
+			} else {
+				snaps["dns"] = probe.Snapshot{Probe: "dns", Duration: s.Duration, Err: err.Error()}
 			}
 		}
 		return snaps, facts

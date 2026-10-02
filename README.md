@@ -74,6 +74,14 @@ device it was:
 Open it from any device on the network at `http://<sensor-ip>:8080` (set the
 address with `dashboard` under `[sensor]` in the config).
 
+The compact **Device audit** widget on the dashboard opens `/audit`, a separate
+page with current findings and retained history filterable by device. It also
+shows how long each inside probe and outside witness observation took. These
+times measure detector observation duration, not end-to-end network latency; the
+outside values appear when a configured witness reports them. Set `audit = false`
+under `[sensor]` to disable the audit page, widget and local dashboard timing
+collection. The default is on.
+
 ## Installing
 
 Two parts, and the first one is useful on its own:

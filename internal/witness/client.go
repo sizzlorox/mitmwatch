@@ -174,7 +174,7 @@ func (l *Link) handleTick(ctx context.Context, enc *Encoder, tick Tick) {
 		snaps[name] = decodeSnapshot(name, raw)
 	}
 	view := probe.NewWitnessView(true, true, false, "", time.Unix(tick.ObservedAtUnix, 0),
-		snaps, stable, checkTimes(tick.CheckNanos))
+		snaps, stable, checkTimes(tick.CheckNanos)).WithCheckStatus(checkStatuses(tick.CheckStatus))
 	l.mu.Unlock()
 
 	l.publish(view)
@@ -195,8 +195,19 @@ func (l *Link) handleTick(ctx context.Context, enc *Encoder, tick Tick) {
 func checkTimes(nanos map[string]int64) map[string]time.Duration {
 	out := make(map[string]time.Duration, len(nanos))
 	for name, ns := range nanos {
-		if ns > 0 {
+		if (name == "tls" || name == "dns") && ns > 0 {
 			out[name] = time.Duration(ns)
+		}
+	}
+	return out
+}
+
+func checkStatuses(statuses map[string]string) map[string]string {
+	out := make(map[string]string, len(statuses))
+	for name, status := range statuses {
+		if (name == "tls" || name == "dns") &&
+			(status == "complete" || status == "incomplete" || status == "unavailable") {
+			out[name] = status
 		}
 	}
 	return out

@@ -64,8 +64,9 @@ type Tick struct {
 	Snap    map[string]json.RawMessage `json:"snap"` // probe name -> that probe's snapshot payload
 	// ObservedAtUnix is the witness's wall clock, for human-readable evidence
 	// only. Nothing depends on it for correctness.
-	ObservedAtUnix int64 `json:"observed_at_unix"`
-	CheckNanos     map[string]int64 `json:"check_nanos,omitempty"`
+	ObservedAtUnix int64             `json:"observed_at_unix"`
+	CheckNanos     map[string]int64  `json:"check_nanos,omitempty"`
+	CheckStatus    map[string]string `json:"check_status,omitempty"`
 }
 
 // Report is the sensor's answer: its own view, for the witness's history and
