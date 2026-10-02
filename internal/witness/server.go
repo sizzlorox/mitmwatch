@@ -162,9 +162,13 @@ func (s *Server) pushTick(enc *Encoder, targets, refused []string) error {
 	// (hosts, issuer, ...), and wrapping them under probe/time/data would bury
 	// those one level deeper than every reader expects.
 	raw := map[string]json.RawMessage{}
+	checkNanos := map[string]int64{}
 	for name, sn := range snaps {
 		if len(sn.Data) > 0 {
 			raw[name] = sn.Data
+		}
+		if sn.Duration > 0 {
+			checkNanos[name] = int64(sn.Duration)
 		}
 	}
 	return enc.Write(TypeTick, Tick{
@@ -174,6 +178,7 @@ func (s *Server) pushTick(enc *Encoder, targets, refused []string) error {
 		Refused:        refused,
 		Snap:           raw,
 		ObservedAtUnix: time.Now().Unix(),
+		CheckNanos:     checkNanos,
 	})
 }
 

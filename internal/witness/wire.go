@@ -65,6 +65,7 @@ type Tick struct {
 	// ObservedAtUnix is the witness's wall clock, for human-readable evidence
 	// only. Nothing depends on it for correctness.
 	ObservedAtUnix int64 `json:"observed_at_unix"`
+	CheckNanos     map[string]int64 `json:"check_nanos,omitempty"`
 }
 
 // Report is the sensor's answer: its own view, for the witness's history and

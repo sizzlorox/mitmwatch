@@ -177,6 +177,13 @@ type env struct {
 	learnedOnce bool                 // emitted the "finished learning" event already
 	witnessUp   bool                 // last witness-link state, for connect/disconnect events
 	nameCache   map[string]nameEntry // reverse-DNS device names, cached
+	checks      map[string]auditCheck // most recent completed local checks
+}
+
+type auditCheck struct {
+	duration time.Duration
+	status   string
+	when     time.Time
 }
 
 // recentFindings is one probe's last output with an expiry.

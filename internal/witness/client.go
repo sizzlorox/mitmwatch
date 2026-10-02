@@ -174,7 +174,7 @@ func (l *Link) handleTick(ctx context.Context, enc *Encoder, tick Tick) {
 		snaps[name] = decodeSnapshot(name, raw)
 	}
 	view := probe.NewWitnessView(true, true, false, "", time.Unix(tick.ObservedAtUnix, 0),
-		snaps, stable)
+		snaps, stable, checkTimes(tick.CheckNanos))
 	l.mu.Unlock()
 
 	l.publish(view)
@@ -190,6 +190,16 @@ func (l *Link) handleTick(ctx context.Context, enc *Encoder, tick Tick) {
 		}
 		enc.Write(TypeReport, Report{Nonce: tick.Nonce, Snap: raw}) //nolint:errcheck
 	}
+}
+
+func checkTimes(nanos map[string]int64) map[string]time.Duration {
+	out := make(map[string]time.Duration, len(nanos))
+	for name, ns := range nanos {
+		if ns > 0 {
+			out[name] = time.Duration(ns)
+		}
+	}
+	return out
 }
 
 // updateStability advances each host's streak and returns the set of hosts that

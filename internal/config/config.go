@@ -47,6 +47,8 @@ type Sensor struct {
 	// disable. ":8080" listens on every interface; "127.0.0.1:8080" is
 	// localhost only, which is right for a laptop.
 	Dashboard string `toml:"dashboard"`
+	// Audit enables the filterable per-device findings and check-timing view.
+	Audit bool `toml:"audit"`
 	// CaptureWindowSec is how long one pass listens on the wire. Short is
 	// enough for ARP poisoning, which repeats about once a second in every
 	// common tool; longer would be needed for anything that happens once.
@@ -171,7 +173,7 @@ type Learning struct {
 // Defaults returns a usable configuration for a host that has no config file.
 func Defaults() *Config {
 	return &Config{
-		Sensor: Sensor{Role: "roaming", Capture: "auto"},
+		Sensor: Sensor{Role: "roaming", Capture: "auto", Audit: true},
 		TLS: TLS{
 			Pin:           []string{"github.com", "www.google.com", "cloudflare-dns.com", "registry.npmjs.org"},
 			LearnIssuers:  false,
