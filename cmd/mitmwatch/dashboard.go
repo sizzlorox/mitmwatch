@@ -191,6 +191,70 @@ func (e *env) dashboardDevices() []web.Device {
 	return out
 }
 
+func dashboardChecks(local map[string]auditCheck, outside probe.WitnessView) []web.CheckTiming {
+	var checks []web.CheckTiming
+	names := make([]string, 0, len(local))
+	for name := range local {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		check := local[name]
+		checks = append(checks, web.CheckTiming{
+			Vantage: "Inside", Check: name, Duration: check.duration,
+			Status: check.status, When: check.when,
+		})
+	}
+	names = names[:0]
+	for name := range outside.CheckTimes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		checks = append(checks, web.CheckTiming{
+			Vantage: "Outside", Check: name, Duration: outside.CheckTimes[name],
+			Status: "complete", When: outside.ObservedAt,
+		})
+	}
+	return checks
+}
+
+func (e *env) dashboardFindings(alerts, held []verdict.Alert) []web.AuditFinding {
+	var out []web.AuditFinding
+	appendAlerts := func(as []verdict.Alert, isHeld bool) {
+		for _, alert := range as {
+			for _, finding := range alert.Findings {
+				target := finding.Target
+				if target == "" {
+					target = alert.Target
+				}
+				vantage := "Inside"
+				if strings.Contains(finding.Vector, "witness") || finding.Probe == "witness" {
+					vantage = "Outside"
+				}
+				out = append(out, web.AuditFinding{
+					Device: e.deviceLabel(target, finding.Evidence["hardware"]),
+					Target: target, Vantage: vantage, Check: finding.Probe,
+					Severity: alert.Band.String(), Title: finding.Title,
+					Held: isHeld, Evidence: finding.Evidence,
+				})
+			}
+		}
+	}
+	appendAlerts(alerts, false)
+	appendAlerts(held, true)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Device != out[j].Device {
+			return out[i].Device < out[j].Device
+		}
+		if out[i].Check != out[j].Check {
+			return out[i].Check < out[j].Check
+		}
+		return out[i].Title < out[j].Title
+	})
+	return out
+}
+
 // nameEntry is one cached reverse-DNS result with its age.
 type nameEntry struct {
 	name string
