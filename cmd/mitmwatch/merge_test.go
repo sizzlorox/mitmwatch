@@ -84,6 +84,53 @@ func TestMergeKeepsFindingsWhenAProbeErrors(t *testing.T) {
 	}
 }
 
+func TestMergeKeepsPartialFindingsAlongsideLastCompleteFindings(t *testing.T) {
+	e := &env{}
+	path := fakeProbe{name: "path", iv: 10 * time.Minute}
+	previous := find("path", "path/hop-inserted", 30)
+	blind := find("path", "path/unavailable", 10)
+
+	e.mergeFindings([]probe.Probe{path}, []probe.Finding{previous})
+	e.erroredThisPass = map[string]bool{"path": true}
+	got := e.mergeFindings([]probe.Probe{path}, []probe.Finding{previous, blind})
+	if len(got) != 2 {
+		t.Fatalf("degraded observation findings = %v; want prior and unavailable findings", got)
+	}
+	found := map[string]bool{}
+	for _, f := range got {
+		found[f.Vector] = true
+	}
+	if !found[previous.Vector] || !found[blind.Vector] {
+		t.Fatalf("degraded observation did not preserve both findings: %v", got)
+	}
+
+	e.erroredThisPass = nil
+	if got = e.mergeFindings([]probe.Probe{path}, nil); len(got) != 0 {
+		t.Fatalf("a clean path observation did not clear old and partial findings: %v", got)
+	}
+}
+
+func TestPathObservationCacheOnlyChangesWhenObserved(t *testing.T) {
+	first := probe.Snapshot{Probe: "path", Data: []byte(`{"paths":[{"target":"first"}]}`)}
+	next := probe.Snapshot{Probe: "path", Data: []byte(`{"paths":[{"target":"next"}]}`)}
+	e := &env{observedThisPass: map[string]probe.Snapshot{"path": first}}
+
+	e.updatePathObservation()
+	if string(e.observedPath.Data) != string(first.Data) {
+		t.Fatalf("cached path = %s, want %s", e.observedPath.Data, first.Data)
+	}
+	e.observedThisPass = map[string]probe.Snapshot{}
+	e.updatePathObservation()
+	if string(e.observedPath.Data) != string(first.Data) {
+		t.Fatal("path cache was cleared in a cycle without a path observation")
+	}
+	e.observedThisPass = map[string]probe.Snapshot{"path": next}
+	e.updatePathObservation()
+	if string(e.observedPath.Data) != string(next.Data) {
+		t.Fatalf("cached path = %s, want latest observation %s", e.observedPath.Data, next.Data)
+	}
+}
+
 // A finding older than 2x the probe's interval is dropped, so a condition that
 // vanished with the probe (rather than being observed clean) does not linger.
 func TestMergeAgesOutStaleFindings(t *testing.T) {

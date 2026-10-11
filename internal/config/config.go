@@ -22,6 +22,7 @@ type Config struct {
 	DNS      DNS            `toml:"dns"`
 	SSLStrip SSLStrip       `toml:"sslstrip"`
 	Clock    Clock          `toml:"clock"`
+	Trace    Path           `toml:"path"`
 	Nameres  Nameres        `toml:"nameres"`
 	CT       CT             `toml:"ct"`
 	Inbound  Inbound        `toml:"inbound"`
@@ -149,6 +150,14 @@ type Clock struct {
 	TimeoutSec int      `toml:"timeout_sec"`
 }
 
+// Path configures the route trace. Targets are plain addresses or hostnames the
+// sensor sends TTL-limited ICMP echoes towards; nothing is sent anywhere else.
+type Path struct {
+	Targets   []string `toml:"targets"`
+	MaxHops   int      `toml:"max_hops"`
+	TimeoutMs int      `toml:"timeout_ms"`
+}
+
 type CT struct {
 	OwnedDomains []string `toml:"owned_domains"`
 }
@@ -196,6 +205,7 @@ func Defaults() *Config {
 			NTP:        []string{"pool.ntp.org", "time.cloudflare.com"},
 			TimeoutSec: 5,
 		},
+		Trace:    Path{Targets: []string{"1.1.1.1", "8.8.8.8"}, MaxHops: 12, TimeoutMs: 1000},
 		Alerts:   Alerts{Sinks: []string{"log"}},
 		Learning: Learning{WindowMin: 10},
 		Weights:  DefaultWeights(),
@@ -262,6 +272,11 @@ func DefaultWeights() map[string]int {
 		// clock
 		"clock/drift-major": 50,
 		"clock/drift-minor": 30,
+
+		// path
+		"path/first-hop-changed": 60,
+		"path/hop-inserted":      55,
+		"path/unavailable":       10,
 	}
 }
 

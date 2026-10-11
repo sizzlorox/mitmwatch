@@ -53,6 +53,7 @@ type State struct {
 	audit       bool
 	checks      []CheckTiming
 	findings    []AuditFinding
+	paths       []PathView
 }
 
 // WitnessCard is the live health of the outside vantage point, for the facts
@@ -168,6 +169,7 @@ func (s *State) Update(u Update) {
 	s.audit = u.AuditEnabled
 	s.checks = u.Checks
 	s.findings = u.Findings
+	s.paths = u.Paths
 	s.areas = map[string]Area{}
 	for _, a := range u.Areas {
 		s.areas[a.Key] = a
@@ -203,6 +205,7 @@ type Update struct {
 	AuditEnabled bool
 	Checks       []CheckTiming
 	Findings     []AuditFinding
+	Paths        []PathView
 }
 
 // overall is the one-sentence, one-colour verdict at the top of the page.
@@ -398,6 +401,19 @@ func Handler(s *State) http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/path", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		enabled := s.audit
+		s.mu.RUnlock()
+		if !enabled {
+			http.NotFound(w, r)
+			return
+		}
+		render(w, "path.html", func() any {
+			return pathData{Network: s.network, Paths: s.paths, Witness: s.witness}
+		})
+	})
+
 	// A machine-readable mirror, for anyone who wants to build on it.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.RLock()
@@ -455,6 +471,12 @@ type auditData struct {
 	Devices  []string
 	Selected string
 	Witness  WitnessCard
+}
+
+type pathData struct {
+	Network string
+	Paths   []PathView
+	Witness WitnessCard
 }
 
 type alertView struct {

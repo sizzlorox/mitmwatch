@@ -402,7 +402,7 @@
       </ul>
       {{else}}<div class="pbody"><div class="clear">Nothing recorded on this network yet.</div></div>{{end}}
       <div class="pfoot">
-        {{if .AuditEnabled}}<div class="audit-widget"><a href="/audit">Device audit</a><span>{{.AuditSummary}}</span></div>{{end}}
+        {{if .AuditEnabled}}<div class="audit-widget"><a href="/audit">Device audit</a> · <a href="/path">Route</a><span>{{.AuditSummary}}</span></div>{{end}}
         {{if gt .EventsKept .EventsShown}}<a href="/activity">The other {{sub .EventsKept .EventsShown}}, with what was seen</a>
         {{else}}<a href="/activity">Full log, with what was seen</a>{{end}}
         {{if gt .EventsTotal .EventsKept}}<span class="dim">&middot; {{.EventsTotal}} recorded in all, the oldest are not kept</span>{{end}}

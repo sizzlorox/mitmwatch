@@ -90,6 +90,14 @@ hosts = ["github.com", "en.wikipedia.org", "www.cloudflare.com"]
 [clock]
 ntp = ["pool.ntp.org", "time.cloudflare.com"]
 
+[path]
+# Route trace: TTL-limited ICMP echoes (like traceroute) towards these targets.
+# A device inserted between you and the internet shows up as a changed first hop
+# or an extra private-address hop. Needs root/administrator (raw ICMP socket).
+targets    = ["1.1.1.1", "8.8.8.8"]
+max_hops   = 12
+timeout_ms = 1000
+
 [alerts]
 # "log" is always on and never rate limited - a record with gaps is not a record.
 # "ntfy" needs no account and no app registration: create a topic name nobody
@@ -139,6 +147,9 @@ cooldown_hours = 6
 "witness/sensor-silent"        = 40   # a sensor that should be reporting went quiet
 "tls/no-sct"                   = 35   # certificate never published to a public log
 "clock/drift-minor"            = 30
+"path/first-hop-changed"       = 60   # traffic now leaves through a different first router
+"path/hop-inserted"            = 55   # a new device inside your network appears in the route
+"path/unavailable"             = 10   # the route could not be traced; this check is blind
 "tls/issuer-unknown"           = 30
 "tls/downgrade"                = 25   # negotiated TLS 1.0 or 1.1
 "sslstrip/no-hsts"             = 20   # a host that used to promise https stopped
