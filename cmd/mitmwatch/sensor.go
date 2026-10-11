@@ -312,9 +312,11 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 		wv := e.witnessView()
 		var checks []web.CheckTiming
 		var auditFindings []web.AuditFinding
+		var paths []web.PathView
 		if e.cfg.Sensor.Audit {
 			checks = dashboardChecks(e.checks, wv)
 			auditFindings = e.dashboardFindings(res.Alerts, res.Held)
+			paths = dashboardPaths(e.observedThisPass["path"], wv)
 		}
 		e.dash.Update(web.Update{
 			Network:  e.net.Label(),
@@ -338,6 +340,7 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 			AuditEnabled: e.cfg.Sensor.Audit,
 			Checks:       checks,
 			Findings:     auditFindings,
+			Paths:        paths,
 		})
 	}
 	return e.store.Save(e.profile)

@@ -1,0 +1,51 @@
+{{define "path.html"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route - mitmwatch</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b21;--edge:#262a33;--ink:#e8eaed;--dim:#9aa0aa;
+    --ok:#2ea043;--warn:#d29922;--bad:#f85149;--learn:#58a6ff}
+  @media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--edge:#e2e5ea;--ink:#1b1f24;--dim:#5b6472}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1100px;margin:auto;padding:18px 16px 40px}
+  a{color:var(--learn)}
+  h1{font-size:22px;margin:0}
+  h2{font-size:16px;margin:24px 0 8px}
+  .sub{color:var(--dim);font-size:13px;margin:4px 0 16px}
+  .empty{padding:12px 0;color:var(--dim)}
+  .diagram{overflow-x:auto;border:1px solid var(--edge);border-radius:8px;background:var(--card);padding:8px}
+  svg text{fill:var(--ink);font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;text-anchor:middle}
+  svg .subtext{fill:var(--dim);font-size:10px}
+  svg line{stroke:var(--edge);stroke-width:2}
+  svg circle{stroke-width:2;fill:var(--card)}
+  .self,.gateway{stroke:var(--learn)}
+  .local{stroke:var(--warn)}
+  .internet,.dest{stroke:var(--ok)}
+  .unknown{stroke:var(--dim);stroke-dasharray:4 3}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <p><a href="/">&larr; Dashboard</a> · <a href="/audit">Device audit</a></p>
+  <h1>Route out of {{.Network}}</h1>
+  <p class="sub">The routers a packet crosses on its way out. Your own network is the first hops (blue and amber); an extra amber hop that was not there before is the sign of a device sitting in the path. Beyond your network, routes vary normally and are not compared. Drawn locally from the hop list: no map service or location lookup is contacted.</p>
+  {{range .Paths}}
+  <h2>{{.Vantage}} · {{.Target}}</h2>
+  <div class="diagram">
+    <svg role="img" aria-label="{{.Summary}}" width="{{.Width}}" height="110" viewBox="0 0 {{.Width}} 110">
+      <line x1="60" y1="40" x2="{{.Last}}" y2="40"/>
+      {{range .Nodes}}<circle class="{{.Class}}" cx="{{.X}}" cy="40" r="14"/>
+      <text x="{{.X}}" y="78">{{.Label}}</text>
+      <text class="subtext" x="{{.X}}" y="94">{{.Sub}}</text>
+      {{end}}
+    </svg>
+  </div>
+  {{else}}<div class="empty">No route has been traced yet. It appears after the first path check completes; if it never does, the sensor lacks the privilege for a raw ICMP socket.</div>{{end}}
+  {{if not .Witness.Configured}}<p class="sub">Outside routes are unavailable: no witness is configured.</p>
+  {{else if not .Witness.Connected}}<p class="sub">Outside routes are unavailable: the witness is not connected.</p>{{end}}
+</main>
+</body>
+</html>{{end}}

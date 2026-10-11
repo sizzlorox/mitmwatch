@@ -460,6 +460,7 @@ apart from an attack. That needs several witnesses in agreement — future work.
 | `dns` | The local resolver sending a name somewhere different from an independent lookup, or inventing an address for a name that does not exist |
 | `sslstrip` | A site that promises https answering in the clear, or one that stopped promising |
 | `clock` | System time far enough out to make an expired certificate look valid |
+| `path` | A device placed in the route out of your network: the first router changed, or a new private-address hop appeared. Needs root/administrator for a raw ICMP socket; without it the check reports that it could not look. The route is drawn as a hop diagram at `/path` on the dashboard (with `[sensor].audit`), drawn locally with no map tiles or geolocation lookups |
 
 Findings carry a score; scores add up per target; bands decide whether anyone
 is interrupted (info < 20, low 20, medium 40, high 60, critical 80). Every

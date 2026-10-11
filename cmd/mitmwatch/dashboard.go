@@ -12,6 +12,7 @@ import (
 
 	"github.com/sizzlorox/mitmwatch/internal/core/verdict"
 	"github.com/sizzlorox/mitmwatch/internal/probe"
+	"github.com/sizzlorox/mitmwatch/internal/probe/pathprobe"
 	"github.com/sizzlorox/mitmwatch/internal/web"
 )
 
@@ -222,6 +223,26 @@ func dashboardChecks(local map[string]auditCheck, outside probe.WitnessView) []w
 		})
 	}
 	return checks
+}
+
+// dashboardPaths turns the sensor's own route traces (inside) and the witness's
+// (outside) into the dashboard's drawable form.
+func dashboardPaths(inside probe.Snapshot, outside probe.WitnessView) []web.PathView {
+	var out []web.PathView
+	add := func(vantage string, paths []pathprobe.Path) {
+		for _, p := range paths {
+			v := web.PathView{Vantage: vantage, Target: p.Target, Reached: p.Reached}
+			for _, h := range p.Hops {
+				v.Hops = append(v.Hops, web.PathHop{TTL: h.TTL, Addr: h.Addr, Class: pathprobe.Class(h.Addr, h.TTL)})
+			}
+			out = append(out, v)
+		}
+	}
+	add("Inside", pathprobe.Decode(inside))
+	if snap, ok := outside.Snapshot("path"); ok {
+		add("Outside", pathprobe.Decode(snap))
+	}
+	return out
 }
 
 func (e *env) dashboardFindings(alerts, held []verdict.Alert) []web.AuditFinding {
