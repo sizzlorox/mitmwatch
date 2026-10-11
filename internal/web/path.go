@@ -1,6 +1,9 @@
 package web
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // PathHop is one step of a route, ready to draw.
 type PathHop struct {
@@ -43,7 +46,7 @@ func (p PathView) Nodes() []Node {
 	hops := p.Hops
 	// The traced target answers as the final hop; drawing it again as the
 	// destination would show one device twice.
-	atTarget := p.Reached && len(hops) > 0 && hops[len(hops)-1].Addr == p.Target
+	atTarget := p.Reached && len(hops) > 0 && hops[len(hops)-1].Addr != ""
 	if atTarget {
 		hops = hops[:len(hops)-1]
 	}
@@ -67,5 +70,20 @@ func (p PathView) Last() int { return p.Nodes()[len(p.Nodes())-1].X }
 
 // Summary is the one-line text alternative to the diagram.
 func (p PathView) Summary() string {
-	return fmt.Sprintf("%d hop(s) to %s", len(p.Hops), p.Target)
+	status := "not reached"
+	if p.Reached {
+		status = "reached"
+	}
+	hops := make([]string, len(p.Hops))
+	for i, h := range p.Hops {
+		addr := h.Addr
+		if addr == "" {
+			addr = "no reply"
+		}
+		hops[i] = fmt.Sprintf("hop %d: %s (%s)", h.TTL, h.Class, addr)
+	}
+	if len(hops) == 0 {
+		return fmt.Sprintf("Route to %s: %s; no hops observed", p.Target, status)
+	}
+	return fmt.Sprintf("Route to %s: %s; %s", p.Target, status, strings.Join(hops, "; "))
 }

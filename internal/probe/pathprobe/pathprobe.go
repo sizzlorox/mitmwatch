@@ -119,7 +119,7 @@ func trace(ctx context.Context, conn *icmp.PacketConn, pc *ipv4.PacketConn, targ
 		}
 		seq := seqBase + uint16(ttl)
 		hop := Hop{TTL: ttl}
-		addr, reached, err := probeTTL(conn, pc, dst, ttl, id, seq, timeout)
+		addr, reached, stop, err := probeTTL(conn, pc, dst, ttl, id, seq, timeout)
 		if err != nil {
 			return p, err
 		}
@@ -128,8 +128,8 @@ func trace(ctx context.Context, conn *icmp.PacketConn, pc *ipv4.PacketConn, targ
 			answered++
 		}
 		p.Hops = append(p.Hops, hop)
-		if reached {
-			p.Reached = true
+		if stop {
+			p.Reached = reached && addr == dst.IP.String()
 			break
 		}
 	}
@@ -142,18 +142,18 @@ func trace(ctx context.Context, conn *icmp.PacketConn, pc *ipv4.PacketConn, targ
 }
 
 func probeTTL(conn *icmp.PacketConn, pc *ipv4.PacketConn, dst *net.IPAddr, ttl int,
-	id, seq uint16, timeout time.Duration) (addr string, reached bool, err error) {
+	id, seq uint16, timeout time.Duration) (addr string, reached, stop bool, err error) {
 	if err := pc.SetTTL(ttl); err != nil {
-		return "", false, err
+		return "", false, false, err
 	}
 	msg := icmp.Message{Type: ipv4.ICMPTypeEcho, Code: 0,
 		Body: &icmp.Echo{ID: int(id), Seq: int(seq), Data: []byte("mitmwatch")}}
 	b, err := msg.Marshal(nil)
 	if err != nil {
-		return "", false, err
+		return "", false, false, err
 	}
 	if _, err := conn.WriteTo(b, dst); err != nil {
-		return "", false, err
+		return "", false, false, err
 	}
 	deadline := time.Now().Add(timeout)
 	buf := make([]byte, 1500)
@@ -163,9 +163,9 @@ func probeTTL(conn *icmp.PacketConn, pc *ipv4.PacketConn, dst *net.IPAddr, ttl i
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
-				return "", false, nil
+				return "", false, false, nil
 			}
-			return "", false, err
+			return "", false, false, err
 		}
 		from, ok := matchReply(buf[:n], id, seq)
 		if !ok {
@@ -174,15 +174,16 @@ func probeTTL(conn *icmp.PacketConn, pc *ipv4.PacketConn, dst *net.IPAddr, ttl i
 		if ip, ok := peer.(*net.IPAddr); ok {
 			from.addr = ip.IP.String()
 		} else {
-			return "", false, fmt.Errorf("reply from unexpected peer type %T", peer)
+			return "", false, false, fmt.Errorf("reply from unexpected peer type %T", peer)
 		}
-		return from.addr, from.final, nil
+		return from.addr, from.reached, from.stop, nil
 	}
 }
 
 type reply struct {
-	addr  string
-	final bool
+	addr    string
+	reached bool
+	stop    bool
 }
 
 // matchReply decides whether an ICMP message answers our probe (id, seq). A
@@ -196,12 +197,13 @@ func matchReply(b []byte, id, seq uint16) (reply, bool) {
 	switch body := m.Body.(type) {
 	case *icmp.Echo:
 		if m.Type == ipv4.ICMPTypeEchoReply && body.ID == int(id) && body.Seq == int(seq) {
-			return reply{final: true}, true
+			return reply{reached: true, stop: true}, true
 		}
 	case *icmp.TimeExceeded:
 		return matchQuoted(body.Data, id, seq, false)
 	case *icmp.DstUnreach:
-		// The target (or a router) refused: the path ends here.
+		// The destination or an intermediate router refused: stop, but do not
+		// claim the configured destination was reached.
 		return matchQuoted(body.Data, id, seq, true)
 	}
 	return reply{}, false
@@ -222,7 +224,7 @@ func matchQuoted(data []byte, id, seq uint16, final bool) (reply, bool) {
 	if binary.BigEndian.Uint16(inner[4:6]) != id || binary.BigEndian.Uint16(inner[6:8]) != seq {
 		return reply{}, false
 	}
-	return reply{final: final}, true
+	return reply{stop: final}, true
 }
 
 // local reports whether an address is on the household side of the path:

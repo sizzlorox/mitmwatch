@@ -205,12 +205,11 @@ func sensorWindow(tick, floor time.Duration) time.Duration {
 
 // mergeFindings maintains the union of every probe's most recent findings.
 //
-// It replaces the entries for the probes that ran this cycle and returns the
-// union with everything still current from earlier cycles. A probe that ran and
-// errored keeps its previous findings rather than clearing them - an error is
-// "I could not look", not "all clear", the same distinction the degraded-
-// snapshot rule makes. An entry is dropped once it is older than twice that
-// probe's interval, so a condition that genuinely cleared does not linger.
+// It replaces the entries for complete observations and returns the union
+// with everything still current from earlier cycles. A degraded observation
+// adds its partial findings without clearing the last complete ones: an error
+// is "I could not fully look", not "all clear". Each view expires after twice
+// that probe's interval, so a condition that genuinely cleared does not linger.
 func (e *env) mergeFindings(ran []probe.Probe, fresh []probe.Finding) []probe.Finding {
 	if e.recent == nil {
 		e.recent = map[string]recentFindings{}
@@ -227,6 +226,17 @@ func (e *env) mergeFindings(ran []probe.Probe, fresh []probe.Finding) []probe.Fi
 	// empty) from "ran and errored" (keep the previous view).
 	for _, p := range ran {
 		if e.erroredThisPass[p.Name()] {
+			if partial := byProbe[p.Name()]; len(partial) > 0 {
+				iv := p.Interval()
+				if iv <= 0 {
+					iv = 2 * time.Minute
+				}
+				r := e.recent[p.Name()]
+				r.ttl = 2 * iv
+				r.partialAt = now
+				r.partial = partial
+				e.recent[p.Name()] = r
+			}
 			continue
 		}
 		iv := p.Interval()
@@ -239,13 +249,37 @@ func (e *env) mergeFindings(ran []probe.Probe, fresh []probe.Finding) []probe.Fi
 	// Union, dropping anything stale.
 	var out []probe.Finding
 	for name, r := range e.recent {
-		if now.Sub(r.at) > r.ttl {
+		if !r.at.IsZero() && now.Sub(r.at) > r.ttl {
+			r.findings = nil
+			r.at = time.Time{}
+		}
+		if !r.partialAt.IsZero() && now.Sub(r.partialAt) > r.ttl {
+			r.partial = nil
+			r.partialAt = time.Time{}
+		}
+		if r.at.IsZero() && r.partialAt.IsZero() {
 			delete(e.recent, name)
 			continue
 		}
-		out = append(out, r.findings...)
+		seen := map[string]bool{}
+		for _, fs := range [][]probe.Finding{r.findings, r.partial} {
+			for _, f := range fs {
+				if seen[f.Hash()] {
+					continue
+				}
+				seen[f.Hash()] = true
+				out = append(out, f)
+			}
+		}
+		e.recent[name] = r
 	}
 	return out
+}
+
+func (e *env) updatePathObservation() {
+	if snap, ok := e.observedThisPass["path"]; ok {
+		e.observedPath = snap
+	}
 }
 
 // sensorObserve answers a witness tick with the sensor's own tls/dns view, for
@@ -273,6 +307,7 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 	}
 
 	fresh, probeErrs := e.pass(ctx, probes)
+	e.updatePathObservation()
 
 	// Evaluate the whole world, not just the probes that were due this cycle.
 	//
@@ -316,7 +351,7 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 		if e.cfg.Sensor.Audit {
 			checks = dashboardChecks(e.checks, wv)
 			auditFindings = e.dashboardFindings(res.Alerts, res.Held)
-			paths = dashboardPaths(e.observedThisPass["path"], wv)
+			paths = dashboardPaths(e.observedPath, wv)
 		}
 		e.dash.Update(web.Update{
 			Network:  e.net.Label(),
@@ -379,6 +414,7 @@ func (e *env) refresh(ctx context.Context) error {
 		return err
 	}
 	e.net, e.profile, e.fresh = n, prof, fresh
+	e.observedPath = probe.Snapshot{}
 
 	evs, err := e.store.LoadEvents(prof.Key)
 	if err != nil {

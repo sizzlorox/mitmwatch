@@ -81,13 +81,18 @@ func (Probe) Compare(base, cur probe.Snapshot, cc probe.CompareCtx) []probe.Find
 		}
 
 		known := map[string]bool{}
-		for _, a := range bl {
-			known[a] = true
+		unknown := map[int]bool{}
+		for _, h := range bl {
+			if h.Addr == "" {
+				unknown[h.TTL] = true
+			} else {
+				known[h.Addr] = true
+			}
 		}
 		var added []string
-		for _, a := range cl {
-			if a != "" && !known[a] {
-				added = append(added, a)
+		for _, h := range cl {
+			if h.Addr != "" && !known[h.Addr] && !unknown[h.TTL] {
+				added = append(added, h.Addr)
 			}
 		}
 		if len(added) > 0 {
@@ -111,13 +116,13 @@ func firstAddr(p Path) string {
 
 // localPrefix is the run of household-side hops from the start of the path,
 // unanswered ones kept as "" placeholders so positions stay honest.
-func localPrefix(p Path) []string {
-	var out []string
+func localPrefix(p Path) []Hop {
+	var out []Hop
 	for _, h := range p.Hops {
 		if h.Addr != "" && !local(h.Addr) {
 			break
 		}
-		out = append(out, h.Addr)
+		out = append(out, h)
 	}
 	return out
 }

@@ -158,6 +158,7 @@ type env struct {
 	// unabsorbed change, so at exactly the moment an attacker appears the
 	// stored view is still the world as it was before.
 	observedThisPass map[string]probe.Snapshot
+	observedPath     probe.Snapshot
 	link             *witness.Link
 	// firstDeliver guards the cooldown Forget on the first cycle after start,
 	// when the in-memory finding union is empty and would otherwise clear
@@ -186,11 +187,13 @@ type auditCheck struct {
 	when     time.Time
 }
 
-// recentFindings is one probe's last output with an expiry.
+// recentFindings keeps the last complete output and any newer partial output.
 type recentFindings struct {
-	at       time.Time
-	ttl      time.Duration
-	findings []probe.Finding
+	at        time.Time
+	ttl       time.Duration
+	findings  []probe.Finding
+	partialAt time.Time
+	partial   []probe.Finding
 }
 
 // parseArgs makes flags work on either side of the positional arguments.

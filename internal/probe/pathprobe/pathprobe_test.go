@@ -4,6 +4,9 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
+
 	"github.com/sizzlorox/mitmwatch/internal/config"
 	"github.com/sizzlorox/mitmwatch/internal/probe"
 )
@@ -77,6 +80,9 @@ func TestSilentHopIsNotAChange(t *testing.T) {
 	if fs := (Probe{}).Compare(snapOf(t, false, a), snapOf(t, false, b), cc()); len(fs) != 0 {
 		t.Fatalf("silent hop flagged: %+v", fs)
 	}
+	if fs := (Probe{}).Compare(snapOf(t, false, b), snapOf(t, false, a), cc()); len(fs) != 0 {
+		t.Fatalf("a reply at a previously silent hop was flagged: %+v", fs)
+	}
 }
 
 func TestNoBaselineIsQuiet(t *testing.T) {
@@ -121,6 +127,22 @@ func TestMatchQuoted(t *testing.T) {
 		if _, ok := matchQuoted(short, 7, 9, false); ok {
 			t.Fatalf("truncated input matched: %d bytes", len(short))
 		}
+	}
+}
+
+func TestDestinationUnreachableStopsWithoutClaimingReached(t *testing.T) {
+	msg := icmp.Message{
+		Type: ipv4.ICMPTypeDestinationUnreachable,
+		Code: 1,
+		Body: &icmp.DstUnreach{Data: quoted(7, 9)},
+	}
+	b, err := msg.Marshal(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := matchReply(b, 7, 9)
+	if !ok || !r.stop || r.reached {
+		t.Fatalf("unreachable reply = %+v, matched %v; want stop=true and reached=false", r, ok)
 	}
 }
 
