@@ -71,6 +71,10 @@ device it was:
 
 ![the mitmwatch activity page — each entry timestamped, naming the device, the severity and the check that fired, with the evidence behind it expandable](docs/activity.png)
 
+The route page (`/path`) draws the way out of the network hop by hop. A new device in the household part of the route (amber, third node) is the sign of an interceptor:
+
+![the mitmwatch route page — two routes drawn as hop diagrams, the second with an extra private-address hop inserted after the gateway](docs/route-path.png)
+
 Open it from any device on the network at `http://<sensor-ip>:8080` (set the
 address with `dashboard` under `[sensor]` in the config).
 
