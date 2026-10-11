@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -189,6 +190,7 @@ func TestBothViewsShowTheNewestEntryFirst(t *testing.T) {
 			Kind: "system", Text: "entry-" + string(rune('a'+i)),
 		})
 	}
+
 	// As the sensor stores them: oldest first.
 	s.Update(Update{Network: "home", When: time.Now(), Events: evs, EventsTotal: len(evs)})
 
@@ -213,5 +215,57 @@ func TestBothViewsShowTheNewestEntryFirst(t *testing.T) {
 	_, all, _ := get(t, Handler(s), "/activity")
 	if !strings.Contains(all, "entry-a") {
 		t.Error("the activity page dropped the oldest entry; it is the full log")
+	}
+}
+
+func TestAuditFiltersDeviceAndShowsBothVantageTimings(t *testing.T) {
+	s := NewState()
+	s.Update(Update{
+		Network: "home", AuditEnabled: true,
+		Checks: []CheckTiming{
+			{Vantage: "Inside", Check: "arp", Duration: 12 * time.Millisecond, Status: "complete"},
+			{Vantage: "Outside", Check: "tls", Duration: 230 * time.Millisecond, Status: "complete"},
+		},
+		Findings: []AuditFinding{
+			{Device: "laptop", Target: "10.0.0.5", Vantage: "Inside", Check: "nameres",
+				Severity: "high", Title: "Unexpected name response"},
+			{Device: "printer", Target: "10.0.0.9", Vantage: "Outside", Check: "tls",
+				Severity: "medium", Title: "Outside certificate mismatch"},
+		},
+		Events: []Event{
+			{When: time.Now(), Kind: "alert", Device: "laptop", Text: "Laptop finding"},
+			{When: time.Now(), Kind: "alert", Device: "printer", Text: "Printer finding"},
+		},
+	})
+
+	_, home, _ := get(t, Handler(s), "/")
+	if !strings.Contains(home, `href="/audit">Device audit`) ||
+		!strings.Contains(home, "Inside slowest: arp 12.0ms") {
+		t.Error("enabled audit widget is missing its link or timing summary")
+	}
+	_, all, _ := get(t, Handler(s), "/audit")
+	for _, want := range []string{"12.0ms", "230.0ms", "Unexpected name response", "Outside certificate mismatch"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("audit page missing %q", want)
+		}
+	}
+	_, filtered, _ := get(t, Handler(s), "/audit?device=laptop")
+	if !strings.Contains(filtered, "Unexpected name response") || !strings.Contains(filtered, "Laptop finding") {
+		t.Error("device filter dropped the selected device's findings or history")
+	}
+	if strings.Contains(filtered, "Outside certificate mismatch") || strings.Contains(filtered, "Printer finding") {
+		t.Error("device filter leaked another device's findings or history")
+	}
+}
+
+func TestDisabledAuditHidesWidgetAndReturnsNotFound(t *testing.T) {
+	s := NewState()
+	s.Update(Update{Network: "home", AuditEnabled: false})
+	if code, _, _ := get(t, Handler(s), "/audit"); code != http.StatusNotFound {
+		t.Errorf("disabled audit page status = %d, want 404", code)
+	}
+	_, home, _ := get(t, Handler(s), "/")
+	if strings.Contains(home, "Device audit") {
+		t.Error("disabled audit widget is still shown on the dashboard")
 	}
 }

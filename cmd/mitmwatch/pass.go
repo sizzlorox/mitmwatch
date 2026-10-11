@@ -52,6 +52,7 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 		adopted  = map[string]probe.Snapshot{}
 		observed = map[string]probe.Snapshot{}
 		errored  = map[string]bool{}
+		checks   = map[string]auditCheck{}
 	)
 	addErr := func(err error) {
 		mu.Lock()
@@ -106,6 +107,7 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 			defer wg.Done()
 
 			base := baselines[p.Name()]
+			started := time.Now()
 			snap, err := p.Observe(ctx, probe.Inputs{
 				Frames:        streams[p.Name()],
 				CaptureWindow: e.captureWindow,
@@ -113,12 +115,19 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 				Network:       e.net,
 				Config:        e.cfg,
 			})
+			duration := time.Since(started)
 			if err != nil {
 				addErr(fmt.Errorf("%s: %w", p.Name(), err))
 				mu.Lock()
 				errored[p.Name()] = true
+				if e.cfg.Sensor.Audit {
+					checks[p.Name()] = auditCheck{duration: duration, status: "unavailable", when: time.Now()}
+				}
 				mu.Unlock()
 				return
+			}
+			if e.cfg.Sensor.Audit {
+				snap.Duration = duration
 			}
 			// A degraded snapshot is also "could not fully look": the sensor's
 			// merge must keep the probe's previous findings rather than treat
@@ -132,6 +141,13 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 
 			mu.Lock()
 			defer mu.Unlock()
+			if e.cfg.Sensor.Audit {
+				status := "complete"
+				if snap.Degraded {
+					status = "incomplete"
+				}
+				checks[p.Name()] = auditCheck{duration: duration, status: status, when: time.Now()}
+			}
 			findings = append(findings, fs...)
 			// What was actually seen this pass, adopted or not. The baseline
 			// deliberately refuses a snapshot that reports an unabsorbed
@@ -150,6 +166,14 @@ func (e *env) pass(ctx context.Context, probes []probe.Probe) ([]probe.Finding, 
 	}
 	wg.Wait()
 	stopFan()
+	if e.cfg.Sensor.Audit {
+		if e.checks == nil {
+			e.checks = map[string]auditCheck{}
+		}
+		for name, check := range checks {
+			e.checks[name] = check
+		}
+	}
 
 	for name, snap := range adopted {
 		e.profile.Snapshots[name] = snap

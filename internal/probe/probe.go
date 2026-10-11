@@ -46,6 +46,9 @@ type Snapshot struct {
 	// same empty snapshot.
 	Degraded bool   `json:"degraded,omitempty"`
 	Err      string `json:"err,omitempty"`
+	// Duration is measured by the runner for audit display and is never persisted
+	// with a baseline or included in the witness comparison payload.
+	Duration time.Duration `json:"-"`
 }
 
 // Encode builds a Snapshot from a probe's own payload type.
@@ -222,7 +225,9 @@ type WitnessView struct {
 	Err string
 	// ObservedAt is the witness's own timestamp - human-readable evidence only,
 	// never a correctness input.
-	ObservedAt time.Time
+	ObservedAt  time.Time
+	CheckTimes  map[string]time.Duration
+	CheckStatus map[string]string
 
 	snap   map[string]Snapshot
 	stable map[string]bool
@@ -232,11 +237,21 @@ type WitnessView struct {
 // hosts whose witness observation has held identical across enough ticks to be
 // trusted as a comparison baseline.
 func NewWitnessView(configured, available, reportDown bool, errStr string, observedAt time.Time,
-	snap map[string]Snapshot, stable map[string]bool) WitnessView {
-	return WitnessView{
+	snap map[string]Snapshot, stable map[string]bool, checkTimes ...map[string]time.Duration) WitnessView {
+	v := WitnessView{
 		Configured: configured, Available: available, ReportDown: reportDown,
 		Err: errStr, ObservedAt: observedAt, snap: snap, stable: stable,
 	}
+	if len(checkTimes) > 0 {
+		v.CheckTimes = checkTimes[0]
+	}
+	return v
+}
+
+// WithCheckStatus attaches the outside observation results for the audit view.
+func (w WitnessView) WithCheckStatus(status map[string]string) WitnessView {
+	w.CheckStatus = status
+	return w
 }
 
 // Snapshot returns the witness's snapshot for a probe, and whether it is usable

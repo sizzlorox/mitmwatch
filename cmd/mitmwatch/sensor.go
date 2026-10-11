@@ -310,6 +310,12 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 
 	if e.dash != nil {
 		wv := e.witnessView()
+		var checks []web.CheckTiming
+		var auditFindings []web.AuditFinding
+		if e.cfg.Sensor.Audit {
+			checks = dashboardChecks(e.checks, wv)
+			auditFindings = e.dashboardFindings(res.Alerts, res.Held)
+		}
 		e.dash.Update(web.Update{
 			Network:  e.net.Label(),
 			Profile:  e.profile.Key,
@@ -325,10 +331,13 @@ func (e *env) cycle(ctx context.Context, probes []probe.Probe) error {
 				Configured: wv.Configured, Connected: wv.Available,
 				Addr: e.cfg.Witness.Addr, LastSeen: wv.ObservedAt,
 			},
-			Since:       e.since,
-			Events:      webEvents(e.events),
-			EventsTotal: e.eventsTotal,
-			DevicesAt:   e.lastCycle,
+			Since:        e.since,
+			Events:       webEvents(e.events),
+			EventsTotal:  e.eventsTotal,
+			DevicesAt:    e.lastCycle,
+			AuditEnabled: e.cfg.Sensor.Audit,
+			Checks:       checks,
+			Findings:     auditFindings,
 		})
 	}
 	return e.store.Save(e.profile)
