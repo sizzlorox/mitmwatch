@@ -233,7 +233,9 @@ func dashboardPaths(inside probe.Snapshot, outside probe.WitnessView) []web.Path
 		for _, p := range paths {
 			v := web.PathView{Vantage: vantage, Target: p.Target, Reached: p.Reached}
 			for _, h := range p.Hops {
-				v.Hops = append(v.Hops, web.PathHop{TTL: h.TTL, Addr: h.Addr, Class: pathprobe.Class(h.Addr, h.TTL)})
+				v.Hops = append(v.Hops, web.PathHop{
+					TTL: h.TTL, Addr: h.Addr, Class: pathprobe.Class(h.Addr, h.TTL), Delay: h.RTT,
+				})
 			}
 			out = append(out, v)
 		}

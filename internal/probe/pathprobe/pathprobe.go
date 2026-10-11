@@ -33,8 +33,9 @@ const name = "path"
 // which routers do routinely (ICMP rate limiting), so it is shown as unknown
 // and never read as either a change or a confirmation.
 type Hop struct {
-	TTL  int    `json:"ttl"`
-	Addr string `json:"addr,omitempty"`
+	TTL  int           `json:"ttl"`
+	Addr string        `json:"addr,omitempty"`
+	RTT  time.Duration `json:"rtt,omitempty"`
 }
 
 // Path is the route to one target.
@@ -119,12 +120,13 @@ func trace(ctx context.Context, conn *icmp.PacketConn, pc *ipv4.PacketConn, targ
 		}
 		seq := seqBase + uint16(ttl)
 		hop := Hop{TTL: ttl}
-		addr, reached, stop, err := probeTTL(conn, pc, dst, ttl, id, seq, timeout)
+		addr, reached, stop, rtt, err := probeTTL(conn, pc, dst, ttl, id, seq, timeout)
 		if err != nil {
 			return p, err
 		}
 		if addr != "" {
 			hop.Addr = addr
+			hop.RTT = rtt
 			answered++
 		}
 		p.Hops = append(p.Hops, hop)
@@ -142,18 +144,19 @@ func trace(ctx context.Context, conn *icmp.PacketConn, pc *ipv4.PacketConn, targ
 }
 
 func probeTTL(conn *icmp.PacketConn, pc *ipv4.PacketConn, dst *net.IPAddr, ttl int,
-	id, seq uint16, timeout time.Duration) (addr string, reached, stop bool, err error) {
+	id, seq uint16, timeout time.Duration) (addr string, reached, stop bool, rtt time.Duration, err error) {
 	if err := pc.SetTTL(ttl); err != nil {
-		return "", false, false, err
+		return "", false, false, 0, err
 	}
 	msg := icmp.Message{Type: ipv4.ICMPTypeEcho, Code: 0,
 		Body: &icmp.Echo{ID: int(id), Seq: int(seq), Data: []byte("mitmwatch")}}
 	b, err := msg.Marshal(nil)
 	if err != nil {
-		return "", false, false, err
+		return "", false, false, 0, err
 	}
+	started := time.Now()
 	if _, err := conn.WriteTo(b, dst); err != nil {
-		return "", false, false, err
+		return "", false, false, 0, err
 	}
 	deadline := time.Now().Add(timeout)
 	buf := make([]byte, 1500)
@@ -163,9 +166,9 @@ func probeTTL(conn *icmp.PacketConn, pc *ipv4.PacketConn, dst *net.IPAddr, ttl i
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
-				return "", false, false, nil
+				return "", false, false, 0, nil
 			}
-			return "", false, false, err
+			return "", false, false, 0, err
 		}
 		from, ok := matchReply(buf[:n], id, seq)
 		if !ok {
@@ -174,9 +177,9 @@ func probeTTL(conn *icmp.PacketConn, pc *ipv4.PacketConn, dst *net.IPAddr, ttl i
 		if ip, ok := peer.(*net.IPAddr); ok {
 			from.addr = ip.IP.String()
 		} else {
-			return "", false, false, fmt.Errorf("reply from unexpected peer type %T", peer)
+			return "", false, false, 0, fmt.Errorf("reply from unexpected peer type %T", peer)
 		}
-		return from.addr, from.reached, from.stop, nil
+		return from.addr, from.reached, from.stop, time.Since(started), nil
 	}
 }
 

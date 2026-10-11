@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // PathHop is one step of a route, ready to draw.
@@ -10,6 +11,7 @@ type PathHop struct {
 	TTL   int
 	Addr  string // empty when nothing answered
 	Class string // gateway | local | internet | unknown
+	Delay time.Duration
 }
 
 // PathView is one route to one target as seen from one vantage.
@@ -54,10 +56,15 @@ func (p PathView) Nodes() []Node {
 		label, sub := h.Addr, h.Class
 		if h.Addr == "" {
 			label, sub = "?", "no answer"
+		} else if h.Delay > 0 {
+			sub += " · " + formatDelay(h.Delay)
 		}
 		nodes = append(nodes, Node{X: hopMargin + hopStep*(i+1), Label: label, Sub: sub, Class: h.Class})
 	}
 	end := Node{X: hopMargin + hopStep*(len(hops)+1), Label: p.Target, Sub: "destination", Class: "dest"}
+	if atTarget && p.Hops[len(p.Hops)-1].Delay > 0 {
+		end.Sub += " · " + formatDelay(p.Hops[len(p.Hops)-1].Delay)
+	}
 	if !p.Reached {
 		end.Sub = "not reached"
 		end.Class = "unknown"
@@ -80,10 +87,21 @@ func (p PathView) Summary() string {
 		if addr == "" {
 			addr = "no reply"
 		}
-		hops[i] = fmt.Sprintf("hop %d: %s (%s)", h.TTL, h.Class, addr)
+		hops[i] = fmt.Sprintf("hop %d: %s (%s%s)", h.TTL, h.Class, addr, summaryDelay(h.Delay))
 	}
 	if len(hops) == 0 {
 		return fmt.Sprintf("Route to %s: %s; no hops observed", p.Target, status)
 	}
 	return fmt.Sprintf("Route to %s: %s; %s", p.Target, status, strings.Join(hops, "; "))
+}
+
+func formatDelay(d time.Duration) string {
+	return d.Round(time.Microsecond).String()
+}
+
+func summaryDelay(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return "; " + formatDelay(d)
 }
