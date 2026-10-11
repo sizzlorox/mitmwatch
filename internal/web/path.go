@@ -27,7 +27,7 @@ const (
 )
 
 // Width is the SVG width: source, every hop, then the destination.
-func (p PathView) Width() int { return hopMargin*2 + hopStep*(len(p.Hops)+1) }
+func (p PathView) Width() int { return p.Last() + hopMargin }
 
 // Node is one circle in the diagram.
 type Node struct {
@@ -40,14 +40,21 @@ type Node struct {
 // Nodes lays the route out left to right: this host, each hop, the target.
 func (p PathView) Nodes() []Node {
 	nodes := []Node{{X: hopMargin, Label: "This host", Class: "self"}}
-	for i, h := range p.Hops {
+	hops := p.Hops
+	// The traced target answers as the final hop; drawing it again as the
+	// destination would show one device twice.
+	atTarget := p.Reached && len(hops) > 0 && hops[len(hops)-1].Addr == p.Target
+	if atTarget {
+		hops = hops[:len(hops)-1]
+	}
+	for i, h := range hops {
 		label, sub := h.Addr, h.Class
 		if h.Addr == "" {
 			label, sub = "?", "no answer"
 		}
 		nodes = append(nodes, Node{X: hopMargin + hopStep*(i+1), Label: label, Sub: sub, Class: h.Class})
 	}
-	end := Node{X: hopMargin + hopStep*(len(p.Hops)+1), Label: p.Target, Sub: "destination", Class: "dest"}
+	end := Node{X: hopMargin + hopStep*(len(hops)+1), Label: p.Target, Sub: "destination", Class: "dest"}
 	if !p.Reached {
 		end.Sub = "not reached"
 		end.Class = "unknown"
@@ -56,7 +63,7 @@ func (p PathView) Nodes() []Node {
 }
 
 // Last is the x of the final node, for the connecting line.
-func (p PathView) Last() int { return hopMargin + hopStep*(len(p.Hops)+1) }
+func (p PathView) Last() int { return p.Nodes()[len(p.Nodes())-1].X }
 
 // Summary is the one-line text alternative to the diagram.
 func (p PathView) Summary() string {
