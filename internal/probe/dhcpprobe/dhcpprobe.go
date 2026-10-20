@@ -203,10 +203,18 @@ func recordClient(clients map[string]clientObs, mac string, msg frame.DHCP) {
 	for i, o := range msg.ParamList {
 		parts[i] = strconv.Itoa(int(o))
 	}
-	clients[mac] = clientObs{
-		Hostname: msg.Hostname, VendorClass: msg.VendorClass,
-		ParamList: strings.Join(parts, ","), LastSeen: time.Now().UTC(),
+	client := clients[mac]
+	if msg.Hostname != "" {
+		client.Hostname = msg.Hostname
 	}
+	if msg.VendorClass != "" {
+		client.VendorClass = msg.VendorClass
+	}
+	if len(parts) > 0 {
+		client.ParamList = strings.Join(parts, ",")
+	}
+	client.LastSeen = time.Now().UTC()
+	clients[mac] = client
 }
 
 func mergeAddrs(have []string, add []netip.Addr) []string {

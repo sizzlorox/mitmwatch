@@ -105,6 +105,25 @@ func TestDevicesPageEscapesNames(t *testing.T) {
 	}
 }
 
+func TestDevicePageIncludesEventsMatchedByHardwareEvidence(t *testing.T) {
+	s := NewState()
+	s.Update(Update{
+		Network: "home", When: time.Now(),
+		Devices: []Device{{
+			IP: "192.0.2.7", MAC: "aa:bb:cc:dd:ee:ff", Name: "laptop",
+			Addrs: []string{"192.0.2.7"},
+		}},
+		Events: []Event{{
+			When: time.Now(), Kind: "alert", Target: "fe80::1",
+			Text: "Link-local alert", Evidence: map[string]string{"hardware": "AA:BB:CC:DD:EE:FF"},
+		}},
+	})
+	code, body, _ := get(t, Handler(s), "/device?mac=aa:bb:cc:dd:ee:ff")
+	if code != 200 || !strings.Contains(body, "Link-local alert") {
+		t.Fatalf("device page omitted an event matched by hardware evidence: status %d, body %q", code, body)
+	}
+}
+
 // A status page about interception must not itself relax the browser.
 func TestSecurityHeaders(t *testing.T) {
 	_, _, h := get(t, Handler(NewState()), "/")

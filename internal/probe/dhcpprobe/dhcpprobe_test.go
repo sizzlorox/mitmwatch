@@ -392,6 +392,27 @@ func TestFirstRealSightingAfterEmptyPassesIsSilent(t *testing.T) {
 	}
 }
 
+func TestClientFingerprintFieldsMergeAcrossMessages(t *testing.T) {
+	mac := "dc:a6:32:11:22:33"
+	discover := buildOffer(offerOpts{
+		srcMAC: mac, srcIP: "0.0.0.0", msgType: frame.DHCPDiscover,
+		hostname: "workstation", vendorClass: "MSFT 5.0",
+	})
+	request := buildOffer(offerOpts{
+		srcMAC: mac, srcIP: "0.0.0.0", msgType: frame.DHCPRequest,
+		params: []byte{1, 3, 6},
+	})
+	cur := observe(t, inputs(t, probe.Snapshot{}, discover, request))
+	var got snapshot
+	if _, err := cur.Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	client := got.Clients[mac]
+	if client.Hostname != "workstation" || client.VendorClass != "MSFT 5.0" || client.ParamList != "1,3,6" {
+		t.Fatalf("later optional fields erased earlier fingerprint fields: %#v", client)
+	}
+}
+
 // And once a server is known, a genuinely new one is still caught.
 func TestNewServerAfterKnownOneIsReported(t *testing.T) {
 	base := probe.Snapshot{}

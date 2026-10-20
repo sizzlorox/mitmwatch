@@ -145,10 +145,11 @@ func ParseDHCP(b []byte) (DHCP, bool) {
 		case optVendorCls:
 			d.VendorClass = printable(val)
 		case optParamList:
-			if length > 32 {
-				length = 32
+			fingerprintLen := length
+			if fingerprintLen > 32 {
+				fingerprintLen = 32
 			}
-			d.ParamList = append([]byte(nil), val[:length]...)
+			d.ParamList = append([]byte(nil), val[:fingerprintLen]...)
 		case optSubnetMask:
 			// decoded for completeness; not used by any rule yet
 		}

@@ -513,6 +513,9 @@ func eventConcerns(ev Event, d Device) bool {
 	if strings.EqualFold(ev.Target, d.MAC) {
 		return true
 	}
+	if hardware := ev.Evidence["hardware"]; hardware != "" && strings.EqualFold(hardware, d.MAC) {
+		return true
+	}
 	return contains(d.Addrs, ev.Target)
 }
 

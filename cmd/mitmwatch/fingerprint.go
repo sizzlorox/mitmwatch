@@ -61,8 +61,8 @@ func dhcpFamily(d baseline.Device) string {
 // a disagreement means something and an unlisted vendor never disagrees.
 var vendorFamilies = map[string][]string{
 	"Apple":        {famApple},
-	"Samsung":      {famAndroid, famEmbedded, famLinux},
-	"Xiaomi":       {famAndroid, famEmbedded, famLinux},
+	"Samsung":      {famWindows, famAndroid, famEmbedded, famLinux},
+	"Xiaomi":       {famWindows, famAndroid, famEmbedded, famLinux},
 	"Raspberry Pi": {famLinux, famEmbedded},
 	"Espressif":    {famEmbedded},
 	"Amazon":       {famAndroid, famEmbedded, famLinux},
