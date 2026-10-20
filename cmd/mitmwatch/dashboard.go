@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sizzlorox/mitmwatch/internal/core/baseline"
 	"github.com/sizzlorox/mitmwatch/internal/core/verdict"
 	"github.com/sizzlorox/mitmwatch/internal/probe"
 	"github.com/sizzlorox/mitmwatch/internal/probe/pathprobe"
@@ -172,6 +173,7 @@ func (e *env) dashboardDevices() []web.Device {
 	hist := e.profile.DeviceList()
 	out := make([]web.Device, 0, len(hist))
 	for _, d := range hist {
+		a := e.assessDevice(d, hist)
 		ip := ""
 		if len(d.Addrs) > 0 {
 			ip = d.Addrs[0]
@@ -182,9 +184,14 @@ func (e *env) dashboardDevices() []web.Device {
 			// "Present" is "seen in the cycle that produced this page", not
 			// "seen recently": the sensor stamps every sighting with the same
 			// cycle time, so the comparison is exact rather than a window.
-			Present: !e.lastCycle.IsZero() && d.LastSeen.Equal(e.lastCycle),
-			Random:  d.Random,
-			Addrs:   d.Addrs,
+			Present:     !e.lastCycle.IsZero() && d.LastSeen.Equal(e.lastCycle),
+			Random:      d.Random,
+			Addrs:       d.Addrs,
+			Vendor:      vendorFor(d.MAC),
+			Cycles:      d.Cycles,
+			Established: d.Established,
+			Notes:       a.Notes, Looks: a.Looks, Verdict: a.Verdict,
+			VerdictClass: a.Class, Behaviour: a.Behaviour,
 		})
 	}
 	// Stable order: connected first, then by address, numerically where
@@ -411,4 +418,194 @@ func dashboardHost(addr string) string {
 		return "<this-device>" + addr
 	}
 	return addr
+}
+
+// deviceAssessment is the read on one device: what it looks like, what it has
+// been seen doing, and a hedged verdict with the reasons. Observations only; it
+// never scores and no Compare reads it.
+type deviceAssessment struct {
+	Looks     string
+	Verdict   string
+	Class     string
+	Behaviour []string
+	Notes     []string
+}
+
+func (e *env) assessDevice(d baseline.Device, all []baseline.Device) deviceAssessment {
+	var a deviceAssessment
+	var warns []string
+	vendor := vendorFor(d.MAC)
+	family := dhcpFamily(d)
+	gatewayIP, gatewayMAC, routerKnown := e.baselineRouter()
+	claims, claimsAvailable := e.currentARPClaims()
+
+	// What it looks like: vendor, then the system its DHCP behaviour points to.
+	var looks []string
+	if vendor != "" {
+		looks = append(looks, "made by "+vendor)
+	}
+	if family != "" {
+		looks = append(looks, "behaves like "+family)
+	}
+	if d.VendorClass != "" {
+		looks = append(looks, "DHCP vendor class \""+d.VendorClass+"\"")
+	}
+	if len(looks) > 0 {
+		a.Looks = strings.Join(looks, "; ")
+	}
+
+	if vendor != "" {
+		a.Notes = append(a.Notes, "The hardware address belongs to "+vendor+".")
+	} else if d.Random {
+		a.Notes = append(a.Notes, "The hardware address is randomised, as phones and laptops do for privacy, so it names no manufacturer. Identify it by name, or by checking which of your devices has \"private Wi-Fi address\" switched on.")
+	} else {
+		a.Notes = append(a.Notes, "The manufacturer of this hardware address is not recognised, so it cannot be identified from the address alone. Compare it with the devices you own.")
+	}
+
+	// Network behaviour.
+	if d.Hostname != "" || d.VendorClass != "" || d.ParamList != "" {
+		line := "Asked for an address by DHCP"
+		if d.Hostname != "" {
+			line += ", calling itself \"" + d.Hostname + "\""
+		}
+		a.Behaviour = append(a.Behaviour, line+".")
+		if d.ParamList != "" {
+			a.Behaviour = append(a.Behaviour, "Requested DHCP options in this order: "+d.ParamList+" (the order identifies the network stack).")
+		}
+	} else {
+		a.Behaviour = append(a.Behaviour, "Has not been seen asking for an address by DHCP, so it said nothing about itself. It may use a fixed address, or the sensor has not watched a lease renewal yet.")
+	}
+	if d.DHCPServer {
+		switch {
+		case !routerKnown:
+			a.Behaviour = append(a.Behaviour, "Unverified: it has answered DHCP requests, but could not verify whether it is the router because the protected ARP baseline does not have a complete router identity.")
+		case strings.EqualFold(d.MAC, gatewayMAC):
+			a.Behaviour = append(a.Behaviour, "Hands out DHCP leases - expected, as it is the router.")
+		default:
+			warns = append(warns, "It has answered DHCP requests but is not the router. A second DHCP server can steer every device that trusts it - that is how a rogue server intercepts traffic.")
+		}
+	}
+
+	if vendorContradicts(vendor, family) {
+		warns = append(warns, "Its hardware says "+vendor+" but its DHCP behaviour looks like "+family+", which that maker does not sell. That can mean a forged hardware address - or an ordinary device with a replaced network card or a virtual machine.")
+	}
+	if d.Hostname != "" && len(d.Addrs) > 0 {
+		for _, o := range all {
+			if o.MAC != d.MAC && o.Hostname != "" && strings.EqualFold(o.Hostname, d.Hostname) {
+				warns = append(warns, "Another hardware address ("+o.MAC+") uses the same hostname \""+d.Hostname+"\". A new address reusing a known name is how an impersonator looks - and how a phone that rotated its address looks.")
+				break
+			}
+		}
+	}
+
+	historicalReuse := false
+	currentConflict := false
+	conflictingMAC := ""
+	for _, ad := range d.Addrs {
+		if routerKnown && ad == gatewayIP && !strings.EqualFold(d.MAC, gatewayMAC) {
+			warns = append(warns, "It answers on the router's address ("+ad+"), but the router's hardware address is "+gatewayMAC+". That is what ARP spoofing looks like.")
+		}
+		for _, o := range all {
+			if strings.EqualFold(o.MAC, d.MAC) {
+				continue
+			}
+			for _, oldAddr := range o.Addrs {
+				if oldAddr == ad {
+					historicalReuse = true
+					break
+				}
+			}
+		}
+		ownClaim := false
+		var otherClaims []string
+		for mac, count := range claims[ad] {
+			if count > 0 {
+				if strings.EqualFold(mac, d.MAC) {
+					ownClaim = true
+				} else {
+					otherClaims = append(otherClaims, mac)
+				}
+			}
+		}
+		if ownClaim && len(otherClaims) > 0 {
+			sort.Strings(otherClaims)
+			currentConflict = true
+			if conflictingMAC == "" {
+				conflictingMAC = otherClaims[0]
+			}
+		}
+	}
+	if currentConflict {
+		warns = append(warns, "An ARP capture saw this address claimed by another hardware address, "+conflictingMAC+". Two devices claiming one address at the same time is a conflict or a spoof.")
+	}
+	if historicalReuse {
+		note := "The same address appears in this device history for another hardware address; a DHCP lease reassignment can explain that."
+		if !claimsAvailable {
+			note += " Current ARP claims could not be checked this cycle."
+		}
+		a.Notes = append(a.Notes, note)
+	}
+	if len(d.Addrs) > 2 {
+		a.Notes = append(a.Notes, "It has answered on several addresses, which is normal after DHCP lease changes but also what an impersonator hopping addresses looks like.")
+	}
+	if !d.Established {
+		a.Notes = append(a.Notes, "It has not been around long enough to count as part of the household yet.")
+	}
+
+	if len(warns) > 0 {
+		lead := make([]string, 0, len(warns)+len(a.Notes))
+		for _, w := range warns {
+			lead = append(lead, "WARNING: "+w)
+		}
+		a.Notes = append(lead, a.Notes...)
+	}
+
+	identified := d.Hostname != "" || family != "" || vendor != ""
+	switch {
+	case len(warns) > 0:
+		a.Class, a.Verdict = verdictSuspicious, "Suspicious - something above does not add up. Check it against your router's client list before trusting it."
+	case d.Established && identified:
+		a.Class, a.Verdict = verdictKnown, "Probably one of yours - it has been here a while and identifies itself consistently. Not proof: a forged device can do the same."
+	default:
+		a.Class, a.Verdict = verdictUnverified, "Unverified - not enough is known to say what this is. Find it in your router's client list; if you do not recognise it, treat it as unknown."
+	}
+	return a
+}
+
+func (e *env) baselineRouter() (ip, mac string, ok bool) {
+	if e.profile == nil {
+		return "", "", false
+	}
+	snap, exists := e.profile.Snapshots["arp"]
+	if !exists || snap.Degraded {
+		return "", "", false
+	}
+	var identity struct {
+		GatewayIP  string `json:"gateway_ip"`
+		GatewayMAC string `json:"gateway_mac"`
+	}
+	decoded, err := snap.Decode(&identity)
+	if !decoded || err != nil || identity.GatewayIP == "" || identity.GatewayMAC == "" {
+		return "", "", false
+	}
+	return identity.GatewayIP, identity.GatewayMAC, true
+}
+
+func (e *env) currentARPClaims() (map[string]map[string]int, bool) {
+	if e.erroredThisPass["arp"] {
+		return nil, false
+	}
+	snap, exists := e.observedThisPass["arp"]
+	if !exists || snap.Empty() || snap.Degraded {
+		return nil, false
+	}
+	var observation struct {
+		Claims   map[string]map[string]int `json:"claims"`
+		Captured bool                      `json:"captured"`
+	}
+	decoded, err := snap.Decode(&observation)
+	if !decoded || err != nil || !observation.Captured {
+		return nil, false
+	}
+	return observation.Claims, true
 }

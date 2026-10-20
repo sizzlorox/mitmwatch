@@ -105,6 +105,25 @@ func TestDevicesPageEscapesNames(t *testing.T) {
 	}
 }
 
+func TestDevicePageIncludesEventsMatchedByHardwareEvidence(t *testing.T) {
+	s := NewState()
+	s.Update(Update{
+		Network: "home", When: time.Now(),
+		Devices: []Device{{
+			IP: "192.0.2.7", MAC: "aa:bb:cc:dd:ee:ff", Name: "laptop",
+			Addrs: []string{"192.0.2.7"},
+		}},
+		Events: []Event{{
+			When: time.Now(), Kind: "alert", Target: "fe80::1",
+			Text: "Link-local alert", Evidence: map[string]string{"hardware": "AA:BB:CC:DD:EE:FF"},
+		}},
+	})
+	code, body, _ := get(t, Handler(s), "/device?mac=aa:bb:cc:dd:ee:ff")
+	if code != 200 || !strings.Contains(body, "Link-local alert") {
+		t.Fatalf("device page omitted an event matched by hardware evidence: status %d, body %q", code, body)
+	}
+}
+
 // A status page about interception must not itself relax the browser.
 func TestSecurityHeaders(t *testing.T) {
 	_, _, h := get(t, Handler(NewState()), "/")
@@ -188,4 +207,42 @@ func head(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+func TestNewDeviceEventLinksToDevicePage(t *testing.T) {
+	s := NewState()
+	mac := "aa:bb:cc:dd:ee:ff"
+	s.Update(Update{
+		Network: "home", When: time.Now(),
+		Devices: []Device{{IP: "10.0.0.9", MAC: mac, Addrs: []string{"10.0.0.9"},
+			Notes: []string{"WARNING: it answers on the router's address"},
+			Looks: "made by Apple", Verdict: "Suspicious - check it", VerdictClass: "suspicious",
+			Behaviour: []string{"Asked for an address by DHCP"}}},
+		Events: []Event{
+			{When: time.Now(), Kind: "device", Text: "New device on the network", Target: mac, Device: "10.0.0.9"},
+			{When: time.Now(), Kind: "alert", Text: "other", Target: "10.0.0.77"},
+		},
+		EventsTotal: 2,
+	})
+	h := Handler(s)
+	_, home, _ := get(t, h, "/")
+	if !strings.Contains(home, "/device?mac=aa%3abb%3acc%3add%3aee%3aff") {
+		t.Errorf("new-device entry is not clickable:\n%s", home)
+	}
+	code, body, _ := get(t, h, "/device?mac="+mac)
+	if code != 200 || !strings.Contains(body, "WARNING") || !strings.Contains(body, "New device on the network") {
+		t.Errorf("device page missing assessment or history:\n%s", body)
+	}
+	for _, want := range []string{"Looks like: made by Apple", "Suspicious - check it", "v-suspicious", "Network behaviour", "Asked for an address by DHCP"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("device page missing %q", want)
+		}
+	}
+	if strings.Contains(body, ">other<") || strings.Contains(body, "· other") {
+		t.Errorf("device page shows an event about another device")
+	}
+	_, nf, _ := get(t, h, "/device?mac=00:00:00:00:00:00")
+	if !strings.Contains(nf, "Device not found") {
+		t.Errorf("unknown mac did not say not found")
+	}
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -52,17 +54,24 @@ func (e *env) recordDeviceHistory(ctx context.Context, now time.Time) {
 	}
 	names := e.resolveNames(ctx, ips)
 
+	clients, servers := e.dhcpIdentities()
 	seen := make([]baseline.Device, 0, len(byMAC))
 	for mac, addrs := range byMAC {
 		sortIPs(addrs)
-		seen = append(seen, baseline.Device{
+		dev := baseline.Device{
 			MAC:    mac,
 			Addrs:  addrs,
 			Name:   e.deviceName(addrs[0], mac, names[addrs[0]]),
 			Random: randomMAC(mac),
-		})
+		}
+		if c, ok := clients[mac]; ok {
+			dev.Hostname, dev.VendorClass, dev.ParamList = c.Hostname, c.VendorClass, c.ParamList
+		}
+		dev.DHCPServer = servers[mac]
+		seen = append(seen, dev)
 	}
 
+	e.announceNewDevices(now, seen)
 	if e.profile.RecordDevices(now, seen) {
 		// Capacity pressure is not a housekeeping detail to swallow: a burst of
 		// hardware addresses large enough to fill the history is itself worth
@@ -180,4 +189,92 @@ func sortIPs(ips []string) {
 			ips[j], ips[j-1] = ips[j-1], ips[j]
 		}
 	}
+}
+
+// maxNewDeviceEvents bounds how many arrivals one cycle logs individually. A
+// flood of invented hardware addresses is exactly what an attacker on the
+// segment can produce, and must not be able to push real history out of the
+// log; the overflow is summarised, not dropped.
+const maxNewDeviceEvents = 5
+
+// announceNewDevices logs each hardware address the history has not seen
+// before, with enough in the entry for the dashboard to open a page about it.
+//
+// Silent on an empty history: the first cycle on a network would otherwise
+// report the whole household as newly arrived.
+func (e *env) announceNewDevices(now time.Time, seen []baseline.Device) {
+	if len(e.profile.Devices) == 0 {
+		return
+	}
+	var fresh []baseline.Device
+	for _, d := range seen {
+		if _, known := e.profile.Devices[d.MAC]; !known {
+			fresh = append(fresh, d)
+		}
+	}
+	sort.Slice(fresh, func(i, j int) bool { return fresh[i].MAC < fresh[j].MAC })
+	for i, d := range fresh {
+		if i == maxNewDeviceEvents {
+			e.addEvent(baseline.Event{
+				When: now, Kind: "system",
+				Text: fmt.Sprintf("%d more new devices appeared in the same cycle", len(fresh)-i),
+			})
+			break
+		}
+		label := d.Name
+		if label == "" && len(d.Addrs) > 0 {
+			label = d.Addrs[0]
+		}
+		if label == "" {
+			label = d.MAC
+		}
+		ev := baseline.Event{
+			When: now, Kind: "device", Target: d.MAC, Device: label,
+			Text:     "New device on the network",
+			Evidence: map[string]string{"Hardware address": d.MAC},
+		}
+		if len(d.Addrs) > 0 {
+			ev.Evidence["Addresses"] = strings.Join(d.Addrs, ", ")
+		}
+		e.addEvent(ev)
+	}
+}
+
+// dhcpClient is what a client said about itself in DHCP.
+type dhcpClient struct{ Hostname, VendorClass, ParamList string }
+
+// dhcpIdentities reads the dhcp probe's observation for who said what, and
+// which hardware addresses have answered as a server. Empty when the probe did
+// not observe this pass; absence is not evidence either way.
+func (e *env) dhcpIdentities() (map[string]dhcpClient, map[string]bool) {
+	clients, servers := map[string]dhcpClient{}, map[string]bool{}
+	if e.erroredThisPass["dhcp"] {
+		return clients, servers
+	}
+	snap, ok := e.observedThisPass["dhcp"]
+	if !ok || snap.Empty() {
+		return clients, servers
+	}
+	var s struct {
+		Clients map[string]struct {
+			Hostname    string `json:"hostname"`
+			VendorClass string `json:"vendor_class"`
+			ParamList   string `json:"param_list"`
+		} `json:"clients"`
+		Servers map[string]struct {
+			MAC string `json:"mac"`
+		} `json:"servers"`
+	}
+	if _, err := snap.Decode(&s); err != nil {
+		return clients, servers
+	}
+	for mac, c := range s.Clients {
+		clients[strings.ToLower(mac)] = dhcpClient{c.Hostname, c.VendorClass, c.ParamList}
+	}
+	for _, sv := range s.Servers {
+		if sv.MAC != "" {
+			servers[strings.ToLower(sv.MAC)] = true
+		}
+	}
+	return clients, servers
 }

@@ -118,6 +118,21 @@ type Device struct {
 	// rather than claiming a life the record cannot have.
 	Random bool
 	Addrs  []string
+	// Vendor is the manufacturer named by the hardware address, empty when it
+	// is randomised or unrecognised. Cosmetic, like Name.
+	Vendor      string
+	Cycles      int
+	Established bool
+	// Notes is the plain-language assessment: what the device probably is and
+	// any sign of spoofing. Lines starting "WARNING" are rendered as such.
+	Notes []string
+	// Looks is one line on what the device appears to be; Verdict is a hedged
+	// read of it, VerdictClass one of known | unverified | suspicious.
+	Looks        string
+	Verdict      string
+	VerdictClass string
+	// Behaviour is what the device has been seen doing on the network.
+	Behaviour []string
 }
 
 // CheckTiming is the duration of one detector's most recent observation.
@@ -271,6 +286,7 @@ func Handler(s *State) http.Handler {
 			}
 			return "just now"
 		},
+		"warn":  func(n string) bool { return strings.HasPrefix(n, "WARNING") },
 		"at":    at,
 		"clock": clock,
 		"sub":   func(a, b int) int { return a - b },
@@ -343,6 +359,32 @@ func Handler(s *State) http.Handler {
 				EventsShown: len(recentEvents(s.events)), DevicesAt: s.devicesAt,
 				AuditEnabled: s.audit, AuditSummary: auditSummary(s.checks),
 			}
+		})
+	})
+
+	// One device in detail, reached from a "new device" activity entry or the
+	// device list. Keyed by hardware address, which is what the history is.
+	mux.HandleFunc("/device", func(w http.ResponseWriter, r *http.Request) {
+		mac := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("mac")))
+		render(w, "device.html", func() any {
+			data := deviceData{Network: s.network}
+			for _, d := range s.devices {
+				if mac != "" && strings.ToLower(d.MAC) == mac {
+					dd := d
+					data.Device = &dd
+					break
+				}
+			}
+			if data.Device == nil {
+				return data
+			}
+			for i := len(s.events) - 1; i >= 0; i-- {
+				ev := s.events[i]
+				if eventConcerns(ev, *data.Device) {
+					data.Events = append(data.Events, ev)
+				}
+			}
+			return data
 		})
 	})
 
@@ -454,6 +496,27 @@ type homeData struct {
 type devicesData struct {
 	Network string
 	Devices []Device
+}
+
+type deviceData struct {
+	Network string
+	Device  *Device
+	Events  []Event
+}
+
+// eventConcerns reports whether a log entry was about this device, by hardware
+// address or by any address it has used.
+func eventConcerns(ev Event, d Device) bool {
+	if ev.Target == "" {
+		return false
+	}
+	if strings.EqualFold(ev.Target, d.MAC) {
+		return true
+	}
+	if hardware := ev.Evidence["hardware"]; hardware != "" && strings.EqualFold(hardware, d.MAC) {
+		return true
+	}
+	return contains(d.Addrs, ev.Target)
 }
 
 type activityData struct {

@@ -38,6 +38,14 @@ type Device struct {
 	// Random marks a locally administered address. Phones rotate these, so the
 	// history is of the address, not of the device, and the page has to say so.
 	Random bool `json:"random,omitempty"`
+	// Hostname, VendorClass and ParamList are what the device said about itself
+	// in DHCP. DHCPServer is set when it has been seen answering DHCP requests.
+	// All are chosen by the sender, capped, and for people only: like the rest
+	// of this record, nothing in detection may read them.
+	Hostname    string `json:"dhcp_hostname,omitempty"`
+	VendorClass string `json:"vendor_class,omitempty"`
+	ParamList   string `json:"param_list,omitempty"`
+	DHCPServer  bool   `json:"dhcp_server,omitempty"`
 }
 
 // Bounds on one device record. Addresses and names come off the network, so
@@ -46,6 +54,8 @@ type Device struct {
 const (
 	maxAddrs   = 8
 	maxNameLen = 63
+	// maxParamListLen fits the 32 options the parser keeps.
+	maxParamListLen = 128
 	// maxCycles caps the promotion counter. Past the promotion threshold the
 	// exact number carries no information and only widens the stored integer.
 	maxCycles = 16
@@ -105,6 +115,16 @@ func (p *Profile) RecordDevices(now time.Time, seen []Device) (atCapacity bool) 
 		if s.Name != "" {
 			d.Name = truncate(s.Name, maxNameLen)
 		}
+		if s.Hostname != "" {
+			d.Hostname = truncate(s.Hostname, maxNameLen)
+		}
+		if s.VendorClass != "" {
+			d.VendorClass = truncate(s.VendorClass, maxNameLen)
+		}
+		if s.ParamList != "" {
+			d.ParamList = truncate(s.ParamList, maxParamListLen)
+		}
+		d.DHCPServer = d.DHCPServer || s.DHCPServer
 		// Promotion needs sustained presence measured two independent ways, so
 		// that neither a burst nor a single long-lived sighting is enough.
 		if !d.Established && d.Cycles >= establishCycles && now.Sub(d.FirstSeen) >= establishAge {

@@ -25,6 +25,9 @@ type offerOpts struct {
 	dns      []string
 	wpad     string
 	msgType  uint8
+
+	hostname, vendorClass string
+	params                []byte
 }
 
 func buildOffer(o offerOpts) frame.Frame {
@@ -71,6 +74,15 @@ func buildOffer(o offerOpts) frame.Frame {
 	packAddrs(6, o.dns)
 	if o.wpad != "" {
 		opt(252, []byte(o.wpad))
+	}
+	if o.hostname != "" {
+		opt(12, []byte(o.hostname))
+	}
+	if o.vendorClass != "" {
+		opt(60, []byte(o.vendorClass))
+	}
+	if len(o.params) > 0 {
+		opt(55, o.params)
 	}
 	dhcp.WriteByte(255)
 
@@ -380,6 +392,27 @@ func TestFirstRealSightingAfterEmptyPassesIsSilent(t *testing.T) {
 	}
 }
 
+func TestClientFingerprintFieldsMergeAcrossMessages(t *testing.T) {
+	mac := "dc:a6:32:11:22:33"
+	discover := buildOffer(offerOpts{
+		srcMAC: mac, srcIP: "0.0.0.0", msgType: frame.DHCPDiscover,
+		hostname: "workstation", vendorClass: "MSFT 5.0",
+	})
+	request := buildOffer(offerOpts{
+		srcMAC: mac, srcIP: "0.0.0.0", msgType: frame.DHCPRequest,
+		params: []byte{1, 3, 6},
+	})
+	cur := observe(t, inputs(t, probe.Snapshot{}, discover, request))
+	var got snapshot
+	if _, err := cur.Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	client := got.Clients[mac]
+	if client.Hostname != "workstation" || client.VendorClass != "MSFT 5.0" || client.ParamList != "1,3,6" {
+		t.Fatalf("later optional fields erased earlier fingerprint fields: %#v", client)
+	}
+}
+
 // And once a server is known, a genuinely new one is still caught.
 func TestNewServerAfterKnownOneIsReported(t *testing.T) {
 	base := probe.Snapshot{}
@@ -424,5 +457,31 @@ func TestRealResolverStillCatchesRogueDNS(t *testing.T) {
 	cur := observe(t, inputs(t, base, f))
 	if got := vectors((Probe{}).Compare(base, cur, c)); got[vecRogueDNS] == 0 {
 		t.Fatal("a rogue DNS offer was missed with a real resolver list")
+	}
+}
+
+func TestClientFingerprintIsRecordedAndNeverAccuses(t *testing.T) {
+	f := buildOffer(offerOpts{
+		srcMAC: rogue, srcIP: "0.0.0.0", msgType: frame.DHCPRequest,
+		hostname: "Johns-iPhone\x1b[31m", vendorClass: "MSFT 5.0", params: []byte{1, 121, 3, 6},
+	})
+	base := observe(t, inputs(t, probe.Snapshot{}, legitimate()))
+	cur := observe(t, inputs(t, base, f))
+	var s snapshot
+	if _, err := cur.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	c, ok := s.Clients[rogue]
+	if !ok {
+		t.Fatalf("client fingerprint not recorded: %v", s.Clients)
+	}
+	if c.Hostname != "Johns-iPhone[31m" || c.VendorClass != "MSFT 5.0" || c.ParamList != "1,121,3,6" {
+		t.Errorf("fingerprint = %+v", c)
+	}
+	if len(s.Servers) != 1 {
+		t.Errorf("a client became a server: %v", s.Servers)
+	}
+	if fs := (Probe{}).Compare(base, cur, probe.CompareCtx{}); len(fs) != 0 {
+		t.Errorf("client fingerprint produced findings: %v", vectors(fs))
 	}
 }

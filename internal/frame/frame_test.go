@@ -61,6 +61,39 @@ func TestParseARPReply(t *testing.T) {
 	}
 }
 
+func TestLongParameterRequestListDoesNotSkipFollowingOptions(t *testing.T) {
+	b := make([]byte, dhcpFixedLen+4)
+	copy(b[dhcpFixedLen:], dhcpMagic[:])
+	opts := []byte{optParamList, 40}
+	for i := 0; i < 40; i++ {
+		opts = append(opts, byte(i+1))
+	}
+	opts = append(opts,
+		optRouter, 4, 192, 0, 2, 1,
+		optDNS, 4, 192, 0, 2, 53,
+		optWPAD, 3, 'w', 'p', 'd',
+		optEnd,
+	)
+	b = append(b, opts...)
+
+	got, ok := ParseDHCP(b)
+	if !ok {
+		t.Fatal("valid DHCP options were rejected")
+	}
+	if len(got.ParamList) != 32 {
+		t.Errorf("parameter-list fingerprint length = %d, want 32", len(got.ParamList))
+	}
+	if len(got.Routers) != 1 || got.Routers[0].String() != "192.0.2.1" {
+		t.Errorf("router option after long parameter list = %v", got.Routers)
+	}
+	if len(got.DNS) != 1 || got.DNS[0].String() != "192.0.2.53" {
+		t.Errorf("DNS option after long parameter list = %v", got.DNS)
+	}
+	if got.WPAD != "wpd" {
+		t.Errorf("WPAD option after long parameter list = %q", got.WPAD)
+	}
+}
+
 // The spoofer's signature: an unsolicited announcement claiming an address.
 func TestGratuitousAndProbe(t *testing.T) {
 	grat := buildARP(ARPReply, attacker, "10.0.4.1", bcast, "10.0.4.1")

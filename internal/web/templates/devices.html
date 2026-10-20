@@ -36,7 +36,7 @@
     <tr><th>Address</th><th>Hardware</th><th>Name</th><th>First seen at this address</th><th>Last seen</th></tr>
     {{range .Devices}}
     <tr{{if not .Present}} class="gone"{{end}}>
-      <td>{{.IP}}</td>
+      <td><a href="/device?mac={{.MAC}}">{{.IP}}</a></td>
       <td class="mac">{{.MAC}}{{if .Random}}<span class="note">randomised</span>{{end}}</td>
       <td>{{if .Name}}{{.Name}}{{else}}&mdash;{{end}}</td>
       <td>{{clock .FirstSeen}}</td>
