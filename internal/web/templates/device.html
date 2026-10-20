@@ -1,0 +1,53 @@
+{{define "device.html"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device - mitmwatch</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b21;--edge:#262a33;--ink:#e8eaed;--dim:#9aa0aa;--learn:#58a6ff;--bad:#f85149}
+  @media (prefers-color-scheme: light){:root{--bg:#f6f7f9;--card:#fff;--edge:#e2e5ea;--ink:#1b1f24;--dim:#5b6472}}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{max-width:960px;margin:0 auto;padding:16px 16px 40px;font-size:15px}
+  a{color:var(--learn)}
+  h1{font-size:17px;margin:0 0 4px}
+  h2{font-size:14px;margin:20px 0 6px}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--edge)}
+  td{padding:6px 12px;border-bottom:1px solid var(--edge);font-size:14px;word-break:break-word}
+  td.k{color:var(--dim);white-space:nowrap;width:1%}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+  ul{padding-left:20px}
+  li.warn{color:var(--bad);font-weight:600}
+  .dim,.empty{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p><a href="/devices">&larr; Devices</a> &middot; <a href="/activity">Activity</a></p>
+  {{if .Device}}{{with .Device}}
+  <h1>{{if .Name}}{{.Name}}{{else}}{{.IP}}{{end}}</h1>
+  <table>
+    <tr><td class="k">Hardware address</td><td class="mono">{{.MAC}}{{if .Random}} (randomised){{end}}</td></tr>
+    <tr><td class="k">Manufacturer</td><td>{{if .Vendor}}{{.Vendor}}{{else}}unknown{{end}}</td></tr>
+    <tr><td class="k">Addresses</td><td class="mono">{{range .Addrs}}{{.}} {{end}}</td></tr>
+    <tr><td class="k">First seen</td><td>{{at .FirstSeen}} &middot; {{since .FirstSeen}}</td></tr>
+    <tr><td class="k">Last seen</td><td>{{if .Present}}connected now{{else}}{{at .LastSeen}} &middot; {{since .LastSeen}}{{end}}</td></tr>
+    <tr><td class="k">Seen in</td><td>{{.Cycles}} check cycle{{if ne .Cycles 1}}s{{end}}{{if .Established}} (established){{else}} (recent arrival){{end}}</td></tr>
+  </table>
+  <h2>What this tells us</h2>
+  <ul>{{range .Notes}}<li{{if warn .}} class="warn"{{end}}>{{.}}</li>{{end}}</ul>
+  <p class="dim">These are observations, not a verdict. The hardware address is whatever the device claims, so a
+  matching manufacturer does not prove identity. Open your router's client list and check for this
+  address before trusting or blocking it.</p>
+  {{end}}
+  <h2>Activity about this device</h2>
+  {{range .Events}}<p>{{at .When}} &middot; {{.Text}}{{if .Band}} ({{.Band}}){{end}}</p>
+  {{else}}<p class="dim">Nothing else has been recorded about it.</p>{{end}}
+  {{else}}
+  <h1>Device not found</h1>
+  <p class="empty">That device is not in the history (it may have been evicted, or never existed).</p>
+  {{end}}
+</div>
+</body>
+</html>{{end}}

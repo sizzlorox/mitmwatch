@@ -189,3 +189,34 @@ func head(s string, n int) string {
 	}
 	return s[:n]
 }
+
+func TestNewDeviceEventLinksToDevicePage(t *testing.T) {
+	s := NewState()
+	mac := "aa:bb:cc:dd:ee:ff"
+	s.Update(Update{
+		Network: "home", When: time.Now(),
+		Devices: []Device{{IP: "10.0.0.9", MAC: mac, Addrs: []string{"10.0.0.9"},
+			Notes: []string{"WARNING: it answers on the router's address"}}},
+		Events: []Event{
+			{When: time.Now(), Kind: "device", Text: "New device on the network", Target: mac, Device: "10.0.0.9"},
+			{When: time.Now(), Kind: "alert", Text: "other", Target: "10.0.0.77"},
+		},
+		EventsTotal: 2,
+	})
+	h := Handler(s)
+	_, home, _ := get(t, h, "/")
+	if !strings.Contains(home, "/device?mac=aa%3abb%3acc%3add%3aee%3aff") {
+		t.Errorf("new-device entry is not clickable:\n%s", home)
+	}
+	code, body, _ := get(t, h, "/device?mac="+mac)
+	if code != 200 || !strings.Contains(body, "WARNING") || !strings.Contains(body, "New device on the network") {
+		t.Errorf("device page missing assessment or history:\n%s", body)
+	}
+	if strings.Contains(body, ">other<") || strings.Contains(body, "· other") {
+		t.Errorf("device page shows an event about another device")
+	}
+	_, nf, _ := get(t, h, "/device?mac=00:00:00:00:00:00")
+	if !strings.Contains(nf, "Device not found") {
+		t.Errorf("unknown mac did not say not found")
+	}
+}

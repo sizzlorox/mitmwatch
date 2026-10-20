@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sizzlorox/mitmwatch/internal/core/baseline"
 	"github.com/sizzlorox/mitmwatch/internal/core/verdict"
 	"github.com/sizzlorox/mitmwatch/internal/probe"
 	"github.com/sizzlorox/mitmwatch/internal/probe/pathprobe"
@@ -182,9 +183,13 @@ func (e *env) dashboardDevices() []web.Device {
 			// "Present" is "seen in the cycle that produced this page", not
 			// "seen recently": the sensor stamps every sighting with the same
 			// cycle time, so the comparison is exact rather than a window.
-			Present: !e.lastCycle.IsZero() && d.LastSeen.Equal(e.lastCycle),
-			Random:  d.Random,
-			Addrs:   d.Addrs,
+			Present:     !e.lastCycle.IsZero() && d.LastSeen.Equal(e.lastCycle),
+			Random:      d.Random,
+			Addrs:       d.Addrs,
+			Vendor:      vendorFor(d.MAC),
+			Cycles:      d.Cycles,
+			Established: d.Established,
+			Notes:       e.deviceNotes(d, hist),
 		})
 	}
 	// Stable order: connected first, then by address, numerically where
@@ -411,4 +416,43 @@ func dashboardHost(addr string) string {
 		return "<this-device>" + addr
 	}
 	return addr
+}
+
+// deviceNotes is the plain-language read on one device: what it is, and
+// whether anything about it looks like spoofing. It reports observations only;
+// it never scores, and it is not read by any Compare.
+func (e *env) deviceNotes(d baseline.Device, all []baseline.Device) []string {
+	var notes []string
+	if v := vendorFor(d.MAC); v != "" {
+		notes = append(notes, "The hardware address belongs to "+v+".")
+	} else if d.Random {
+		notes = append(notes, "The hardware address is randomised, as phones and laptops do for privacy, so it names no manufacturer. Identify it by name, or by checking which of your devices has \"private Wi-Fi address\" switched on.")
+	} else {
+		notes = append(notes, "The manufacturer of this hardware address is not recognised, so it cannot be identified from the address alone. Compare it with the devices you own.")
+	}
+	if d.Name == "" || d.Name == vendorFor(d.MAC) {
+		notes = append(notes, "It does not announce a hostname.")
+	}
+	for _, a := range d.Addrs {
+		if a == e.net.GatewayIP && e.net.GatewayMAC != "" && !strings.EqualFold(d.MAC, e.net.GatewayMAC) {
+			notes = append(notes, "WARNING: it answers on the router's address ("+a+"), but the router's hardware address is "+e.net.GatewayMAC+". That is what ARP spoofing looks like.")
+		}
+		for _, o := range all {
+			if o.MAC == d.MAC {
+				continue
+			}
+			for _, oa := range o.Addrs {
+				if oa == a && len(o.Addrs) > 0 && o.Addrs[0] == a && len(d.Addrs) > 0 && d.Addrs[0] == a {
+					notes = append(notes, "WARNING: "+a+" is currently claimed by another hardware address, "+o.MAC+". Two devices on one address is a conflict or a spoof.")
+				}
+			}
+		}
+	}
+	if len(d.Addrs) > 2 {
+		notes = append(notes, "It has answered on several addresses, which is normal after DHCP lease changes but also what an impersonator hopping addresses looks like.")
+	}
+	if !d.Established {
+		notes = append(notes, "It has not been around long enough to count as part of the household yet.")
+	}
+	return notes
 }

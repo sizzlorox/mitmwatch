@@ -18,7 +18,7 @@ import (
 // record of an event rather than a record of what happened.
 type Event struct {
 	When time.Time `json:"when"`
-	// Kind is one of: alert, clear, stale, held, system.
+	// Kind is one of: alert, clear, stale, held, system, device.
 	Kind string `json:"kind"`
 	Text string `json:"text"`
 	// Target is what the alert was about - an address, a hostname, "network".
