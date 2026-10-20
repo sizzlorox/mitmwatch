@@ -126,6 +126,13 @@ type Device struct {
 	// Notes is the plain-language assessment: what the device probably is and
 	// any sign of spoofing. Lines starting "WARNING" are rendered as such.
 	Notes []string
+	// Looks is one line on what the device appears to be; Verdict is a hedged
+	// read of it, VerdictClass one of known | unverified | suspicious.
+	Looks        string
+	Verdict      string
+	VerdictClass string
+	// Behaviour is what the device has been seen doing on the network.
+	Behaviour []string
 }
 
 // CheckTiming is the duration of one detector's most recent observation.

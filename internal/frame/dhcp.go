@@ -23,6 +23,9 @@ const (
 	optSubnetMask = 1
 	optRouter     = 3
 	optDNS        = 6
+	optHostname   = 12
+	optParamList  = 55
+	optVendorCls  = 60
 	optMsgType    = 53
 	optServerID   = 54
 	optWPAD       = 252
@@ -51,7 +54,19 @@ type DHCP struct {
 	// WPAD is option 252, a URL to a proxy configuration file. A client that
 	// honours it sends everything through whatever the URL names.
 	WPAD string
+
+	// The client's half of the exchange, which is what identifies the device.
+	// All three are chosen by the sender and are display-only: a forged one
+	// proves nothing, so none may feed a detection rule.
+	Hostname    string
+	VendorClass string
+	// ParamList is option 55 as the client ordered it. The order is a better
+	// operating-system fingerprint than any single value in it.
+	ParamList []byte
 }
+
+// maxClientText bounds the free-text options a client chooses.
+const maxClientText = 64
 
 // MsgTypeName is for evidence a person reads.
 func MsgTypeName(t uint8) string {
@@ -125,6 +140,15 @@ func ParseDHCP(b []byte) (DHCP, bool) {
 			d.DNS = append(d.DNS, addrsFrom(val)...)
 		case optWPAD:
 			d.WPAD = string(val)
+		case optHostname:
+			d.Hostname = printable(val)
+		case optVendorCls:
+			d.VendorClass = printable(val)
+		case optParamList:
+			if length > 32 {
+				length = 32
+			}
+			d.ParamList = append([]byte(nil), val[:length]...)
 		case optSubnetMask:
 			// decoded for completeness; not used by any rule yet
 		}
@@ -154,4 +178,20 @@ func itoa(v int) string {
 		v /= 10
 	}
 	return string(buf[i:])
+}
+
+// printable keeps the visible ASCII of a client-supplied string and truncates
+// it, so nothing a device chooses to send can inject markup or control
+// characters into a page or grow a stored record.
+func printable(b []byte) string {
+	out := make([]byte, 0, len(b))
+	for _, c := range b {
+		if c >= 0x20 && c < 0x7f {
+			out = append(out, c)
+		}
+		if len(out) == maxClientText {
+			break
+		}
+	}
+	return string(out)
 }

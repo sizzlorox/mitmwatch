@@ -52,7 +52,7 @@
   {{range .Events}}
   <div class="ev k-{{.Kind}}">
     <div class="when">{{at .When}} &middot; {{since .When}}</div>
-    <p class="what">{{if eq .Kind "device"}}<a href="/device?mac={{.Target}}">{{.Text}}: {{.Device}}</a>{{else}}{{.Text}}{{end}}</p>
+    <p class="what">{{if and (eq .Kind "device") .Target}}<a href="/device?mac={{.Target}}">{{.Text}}: {{.Device}}</a>{{else}}{{.Text}}{{end}}</p>
     <div class="meta">
       {{if .Device}}<span class="tag"><b>Device</b> {{.Device}}</span>{{end}}
       {{if .Target}}<span class="tag"><b>Target</b> {{.Target}}</span>{{end}}

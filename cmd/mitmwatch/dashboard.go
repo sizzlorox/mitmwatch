@@ -173,6 +173,7 @@ func (e *env) dashboardDevices() []web.Device {
 	hist := e.profile.DeviceList()
 	out := make([]web.Device, 0, len(hist))
 	for _, d := range hist {
+		a := e.assessDevice(d, hist)
 		ip := ""
 		if len(d.Addrs) > 0 {
 			ip = d.Addrs[0]
@@ -189,7 +190,8 @@ func (e *env) dashboardDevices() []web.Device {
 			Vendor:      vendorFor(d.MAC),
 			Cycles:      d.Cycles,
 			Established: d.Established,
-			Notes:       e.deviceNotes(d, hist),
+			Notes:       a.Notes, Looks: a.Looks, Verdict: a.Verdict,
+			VerdictClass: a.Class, Behaviour: a.Behaviour,
 		})
 	}
 	// Stable order: connected first, then by address, numerically where
@@ -418,41 +420,115 @@ func dashboardHost(addr string) string {
 	return addr
 }
 
-// deviceNotes is the plain-language read on one device: what it is, and
-// whether anything about it looks like spoofing. It reports observations only;
-// it never scores, and it is not read by any Compare.
-func (e *env) deviceNotes(d baseline.Device, all []baseline.Device) []string {
-	var notes []string
-	if v := vendorFor(d.MAC); v != "" {
-		notes = append(notes, "The hardware address belongs to "+v+".")
+// deviceAssessment is the read on one device: what it looks like, what it has
+// been seen doing, and a hedged verdict with the reasons. Observations only; it
+// never scores and no Compare reads it.
+type deviceAssessment struct {
+	Looks     string
+	Verdict   string
+	Class     string
+	Behaviour []string
+	Notes     []string
+}
+
+func (e *env) assessDevice(d baseline.Device, all []baseline.Device) deviceAssessment {
+	var a deviceAssessment
+	var warns []string
+	vendor := vendorFor(d.MAC)
+	family := dhcpFamily(d)
+
+	// What it looks like: vendor, then the system its DHCP behaviour points to.
+	var looks []string
+	if vendor != "" {
+		looks = append(looks, "made by "+vendor)
+	}
+	if family != "" {
+		looks = append(looks, "behaves like "+family)
+	}
+	if d.VendorClass != "" {
+		looks = append(looks, "DHCP vendor class \""+d.VendorClass+"\"")
+	}
+	if len(looks) > 0 {
+		a.Looks = strings.Join(looks, "; ")
+	}
+
+	if vendor != "" {
+		a.Notes = append(a.Notes, "The hardware address belongs to "+vendor+".")
 	} else if d.Random {
-		notes = append(notes, "The hardware address is randomised, as phones and laptops do for privacy, so it names no manufacturer. Identify it by name, or by checking which of your devices has \"private Wi-Fi address\" switched on.")
+		a.Notes = append(a.Notes, "The hardware address is randomised, as phones and laptops do for privacy, so it names no manufacturer. Identify it by name, or by checking which of your devices has \"private Wi-Fi address\" switched on.")
 	} else {
-		notes = append(notes, "The manufacturer of this hardware address is not recognised, so it cannot be identified from the address alone. Compare it with the devices you own.")
+		a.Notes = append(a.Notes, "The manufacturer of this hardware address is not recognised, so it cannot be identified from the address alone. Compare it with the devices you own.")
 	}
-	if d.Name == "" || d.Name == vendorFor(d.MAC) {
-		notes = append(notes, "It does not announce a hostname.")
+
+	// Network behaviour.
+	if d.Hostname != "" || d.VendorClass != "" || d.ParamList != "" {
+		line := "Asked for an address by DHCP"
+		if d.Hostname != "" {
+			line += ", calling itself \"" + d.Hostname + "\""
+		}
+		a.Behaviour = append(a.Behaviour, line+".")
+		if d.ParamList != "" {
+			a.Behaviour = append(a.Behaviour, "Requested DHCP options in this order: "+d.ParamList+" (the order identifies the network stack).")
+		}
+	} else {
+		a.Behaviour = append(a.Behaviour, "Has not been seen asking for an address by DHCP, so it said nothing about itself. It may use a fixed address, or the sensor has not watched a lease renewal yet.")
 	}
-	for _, a := range d.Addrs {
-		if a == e.net.GatewayIP && e.net.GatewayMAC != "" && !strings.EqualFold(d.MAC, e.net.GatewayMAC) {
-			notes = append(notes, "WARNING: it answers on the router's address ("+a+"), but the router's hardware address is "+e.net.GatewayMAC+". That is what ARP spoofing looks like.")
+	if d.DHCPServer {
+		if e.net.GatewayMAC != "" && strings.EqualFold(d.MAC, e.net.GatewayMAC) {
+			a.Behaviour = append(a.Behaviour, "Hands out DHCP leases - expected, as it is the router.")
+		} else {
+			warns = append(warns, "It has answered DHCP requests but is not the router. A second DHCP server can steer every device that trusts it - that is how a rogue server intercepts traffic.")
+		}
+	}
+
+	if vendorContradicts(vendor, family) {
+		warns = append(warns, "Its hardware says "+vendor+" but its DHCP behaviour looks like "+family+", which that maker does not sell. That can mean a forged hardware address - or an ordinary device with a replaced network card or a virtual machine.")
+	}
+	if d.Hostname != "" && len(d.Addrs) > 0 {
+		for _, o := range all {
+			if o.MAC != d.MAC && o.Hostname != "" && strings.EqualFold(o.Hostname, d.Hostname) {
+				warns = append(warns, "Another hardware address ("+o.MAC+") uses the same hostname \""+d.Hostname+"\". A new address reusing a known name is how an impersonator looks - and how a phone that rotated its address looks.")
+				break
+			}
+		}
+	}
+
+	for _, ad := range d.Addrs {
+		if ad == e.net.GatewayIP && e.net.GatewayMAC != "" && !strings.EqualFold(d.MAC, e.net.GatewayMAC) {
+			warns = append(warns, "It answers on the router's address ("+ad+"), but the router's hardware address is "+e.net.GatewayMAC+". That is what ARP spoofing looks like.")
 		}
 		for _, o := range all {
-			if o.MAC == d.MAC {
+			if o.MAC == d.MAC || len(o.Addrs) == 0 || len(d.Addrs) == 0 {
 				continue
 			}
-			for _, oa := range o.Addrs {
-				if oa == a && len(o.Addrs) > 0 && o.Addrs[0] == a && len(d.Addrs) > 0 && d.Addrs[0] == a {
-					notes = append(notes, "WARNING: "+a+" is currently claimed by another hardware address, "+o.MAC+". Two devices on one address is a conflict or a spoof.")
-				}
+			if o.Addrs[0] == ad && d.Addrs[0] == ad {
+				warns = append(warns, ad+" is currently claimed by another hardware address, "+o.MAC+". Two devices on one address is a conflict or a spoof.")
 			}
 		}
 	}
 	if len(d.Addrs) > 2 {
-		notes = append(notes, "It has answered on several addresses, which is normal after DHCP lease changes but also what an impersonator hopping addresses looks like.")
+		a.Notes = append(a.Notes, "It has answered on several addresses, which is normal after DHCP lease changes but also what an impersonator hopping addresses looks like.")
 	}
 	if !d.Established {
-		notes = append(notes, "It has not been around long enough to count as part of the household yet.")
+		a.Notes = append(a.Notes, "It has not been around long enough to count as part of the household yet.")
 	}
-	return notes
+
+	if len(warns) > 0 {
+		lead := make([]string, 0, len(warns)+len(a.Notes))
+		for _, w := range warns {
+			lead = append(lead, "WARNING: "+w)
+		}
+		a.Notes = append(lead, a.Notes...)
+	}
+
+	identified := d.Hostname != "" || family != "" || vendor != ""
+	switch {
+	case len(warns) > 0:
+		a.Class, a.Verdict = verdictSuspicious, "Suspicious - something above does not add up. Check it against your router's client list before trusting it."
+	case d.Established && identified:
+		a.Class, a.Verdict = verdictKnown, "Probably one of yours - it has been here a while and identifies itself consistently. Not proof: a forged device can do the same."
+	default:
+		a.Class, a.Verdict = verdictUnverified, "Unverified - not enough is known to say what this is. Find it in your router's client list; if you do not recognise it, treat it as unknown."
+	}
+	return a
 }

@@ -47,7 +47,23 @@ type serverObs struct {
 	LastSeen  time.Time `json:"last_seen"`
 }
 
+// maxClients bounds the client fingerprints kept. They come off the network, so
+// an attacker who can mint requests must not be able to grow the snapshot.
+const maxClients = 128
+
+// clientObs is what a DHCP client said about itself. It is a record for people:
+// Compare never reads it, because a client chooses every field.
+type clientObs struct {
+	Hostname    string    `json:"hostname,omitempty"`
+	VendorClass string    `json:"vendor_class,omitempty"`
+	ParamList   string    `json:"param_list,omitempty"`
+	LastSeen    time.Time `json:"last_seen"`
+}
+
 type snapshot struct {
+	// Clients is keyed by the sender's hardware address, accumulated across
+	// passes. Display-only; see clientObs.
+	Clients map[string]clientObs `json:"clients,omitempty"`
 	// Servers is keyed by the server's address, accumulated across passes.
 	Servers map[string]serverObs `json:"servers,omitempty"`
 	// Captured says listening happened, so an empty Servers map can be told
@@ -80,11 +96,14 @@ func (Probe) Observe(ctx context.Context, in probe.Inputs) (probe.Snapshot, erro
 	// Start from what is already known. DHCP is rare enough that most windows
 	// are empty, and replacing the accumulated view with an empty one would
 	// make every server look new again the next time it spoke.
-	snap := snapshot{Servers: map[string]serverObs{}, Offers: map[string]serverObs{}}
+	snap := snapshot{Servers: map[string]serverObs{}, Offers: map[string]serverObs{}, Clients: map[string]clientObs{}}
 	var prev snapshot
 	if ok, _ := in.Baseline.Decode(&prev); ok {
 		for k, v := range prev.Servers {
 			snap.Servers[k] = v
+		}
+		for k, v := range prev.Clients {
+			snap.Clients[k] = v
 		}
 	}
 
@@ -121,6 +140,9 @@ loop:
 			msg, ok := frame.ParseDHCP(d.UDP.Payload)
 			if !ok {
 				continue
+			}
+			if msg.MsgType == frame.DHCPDiscover || msg.MsgType == frame.DHCPRequest {
+				recordClient(snap.Clients, d.Eth.Src.String(), msg)
 			}
 			if msg.MsgType != frame.DHCPOffer && msg.MsgType != frame.DHCPAck {
 				continue // DISCOVER and REQUEST come from clients and offer nothing
@@ -164,6 +186,27 @@ loop:
 
 	snap.SeenThisPass = sortedSet(seen)
 	return probe.Encode(name, snap)
+}
+
+// recordClient remembers what a client said about itself, keyed by the
+// hardware address on the wire. A new key past the cap is dropped rather than
+// evicting an existing one, so a flood cannot rewrite what was already learned.
+func recordClient(clients map[string]clientObs, mac string, msg frame.DHCP) {
+	if msg.Hostname == "" && msg.VendorClass == "" && len(msg.ParamList) == 0 {
+		return
+	}
+	mac = strings.ToLower(mac)
+	if _, ok := clients[mac]; !ok && len(clients) >= maxClients {
+		return
+	}
+	parts := make([]string, len(msg.ParamList))
+	for i, o := range msg.ParamList {
+		parts[i] = strconv.Itoa(int(o))
+	}
+	clients[mac] = clientObs{
+		Hostname: msg.Hostname, VendorClass: msg.VendorClass,
+		ParamList: strings.Join(parts, ","), LastSeen: time.Now().UTC(),
+	}
 }
 
 func mergeAddrs(have []string, add []netip.Addr) []string {

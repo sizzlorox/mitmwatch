@@ -397,7 +397,7 @@
       {{if .Events}}
       <ul class="pbody log">
       {{range .Events}}
-        <li class="log-{{.Kind}}"><span class="when" title="{{at .When}}">{{since .When}}</span><span class="what">{{if eq .Kind "device"}}<a href="/device?mac={{.Target}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}</span>{{if .Device}}<span class="who">{{.Device}}</span>{{end}}</li>
+        <li class="log-{{.Kind}}"><span class="when" title="{{at .When}}">{{since .When}}</span><span class="what">{{if and (eq .Kind "device") .Target}}<a href="/device?mac={{.Target}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}</span>{{if .Device}}<span class="who">{{.Device}}</span>{{end}}</li>
       {{end}}
       </ul>
       {{else}}<div class="pbody"><div class="clear">Nothing recorded on this network yet.</div></div>{{end}}

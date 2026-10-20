@@ -54,15 +54,21 @@ func (e *env) recordDeviceHistory(ctx context.Context, now time.Time) {
 	}
 	names := e.resolveNames(ctx, ips)
 
+	clients, servers := e.dhcpIdentities()
 	seen := make([]baseline.Device, 0, len(byMAC))
 	for mac, addrs := range byMAC {
 		sortIPs(addrs)
-		seen = append(seen, baseline.Device{
+		dev := baseline.Device{
 			MAC:    mac,
 			Addrs:  addrs,
 			Name:   e.deviceName(addrs[0], mac, names[addrs[0]]),
 			Random: randomMAC(mac),
-		})
+		}
+		if c, ok := clients[mac]; ok {
+			dev.Hostname, dev.VendorClass, dev.ParamList = c.Hostname, c.VendorClass, c.ParamList
+		}
+		dev.DHCPServer = servers[mac]
+		seen = append(seen, dev)
 	}
 
 	e.announceNewDevices(now, seen)
@@ -232,4 +238,43 @@ func (e *env) announceNewDevices(now time.Time, seen []baseline.Device) {
 		}
 		e.addEvent(ev)
 	}
+}
+
+// dhcpClient is what a client said about itself in DHCP.
+type dhcpClient struct{ Hostname, VendorClass, ParamList string }
+
+// dhcpIdentities reads the dhcp probe's observation for who said what, and
+// which hardware addresses have answered as a server. Empty when the probe did
+// not observe this pass; absence is not evidence either way.
+func (e *env) dhcpIdentities() (map[string]dhcpClient, map[string]bool) {
+	clients, servers := map[string]dhcpClient{}, map[string]bool{}
+	if e.erroredThisPass["dhcp"] {
+		return clients, servers
+	}
+	snap, ok := e.observedThisPass["dhcp"]
+	if !ok || snap.Empty() {
+		return clients, servers
+	}
+	var s struct {
+		Clients map[string]struct {
+			Hostname    string `json:"hostname"`
+			VendorClass string `json:"vendor_class"`
+			ParamList   string `json:"param_list"`
+		} `json:"clients"`
+		Servers map[string]struct {
+			MAC string `json:"mac"`
+		} `json:"servers"`
+	}
+	if _, err := snap.Decode(&s); err != nil {
+		return clients, servers
+	}
+	for mac, c := range s.Clients {
+		clients[strings.ToLower(mac)] = dhcpClient{c.Hostname, c.VendorClass, c.ParamList}
+	}
+	for _, sv := range s.Servers {
+		if sv.MAC != "" {
+			servers[strings.ToLower(sv.MAC)] = true
+		}
+	}
+	return clients, servers
 }

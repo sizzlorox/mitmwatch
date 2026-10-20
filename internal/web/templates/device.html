@@ -18,6 +18,8 @@
   td.k{color:var(--dim);white-space:nowrap;width:1%}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
   ul{padding-left:20px}
+  .verdict{margin-top:14px;padding:10px 14px;border-radius:10px;border:1px solid var(--edge);border-left:4px solid var(--dim);background:var(--card)}
+  .v-known{border-left-color:#2ea043}.v-suspicious{border-left-color:var(--bad)}.v-unverified{border-left-color:#d29922}
   li.warn{color:var(--bad);font-weight:600}
   .dim,.empty{color:var(--dim)}
 </style>
@@ -35,6 +37,9 @@
     <tr><td class="k">Last seen</td><td>{{if .Present}}connected now{{else}}{{at .LastSeen}} &middot; {{since .LastSeen}}{{end}}</td></tr>
     <tr><td class="k">Seen in</td><td>{{.Cycles}} check cycle{{if ne .Cycles 1}}s{{end}}{{if .Established}} (established){{else}} (recent arrival){{end}}</td></tr>
   </table>
+  <div class="verdict v-{{.VerdictClass}}"><b>{{if .Looks}}Looks like: {{.Looks}}.{{else}}Looks like: unknown.{{end}}</b><br>{{.Verdict}}</div>
+  <h2>Network behaviour</h2>
+  <ul>{{range .Behaviour}}<li>{{.}}</li>{{end}}</ul>
   <h2>What this tells us</h2>
   <ul>{{range .Notes}}<li{{if warn .}} class="warn"{{end}}>{{.}}</li>{{end}}</ul>
   <p class="dim">These are observations, not a verdict. The hardware address is whatever the device claims, so a

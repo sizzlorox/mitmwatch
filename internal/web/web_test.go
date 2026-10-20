@@ -196,7 +196,9 @@ func TestNewDeviceEventLinksToDevicePage(t *testing.T) {
 	s.Update(Update{
 		Network: "home", When: time.Now(),
 		Devices: []Device{{IP: "10.0.0.9", MAC: mac, Addrs: []string{"10.0.0.9"},
-			Notes: []string{"WARNING: it answers on the router's address"}}},
+			Notes: []string{"WARNING: it answers on the router's address"},
+			Looks: "made by Apple", Verdict: "Suspicious - check it", VerdictClass: "suspicious",
+			Behaviour: []string{"Asked for an address by DHCP"}}},
 		Events: []Event{
 			{When: time.Now(), Kind: "device", Text: "New device on the network", Target: mac, Device: "10.0.0.9"},
 			{When: time.Now(), Kind: "alert", Text: "other", Target: "10.0.0.77"},
@@ -211,6 +213,11 @@ func TestNewDeviceEventLinksToDevicePage(t *testing.T) {
 	code, body, _ := get(t, h, "/device?mac="+mac)
 	if code != 200 || !strings.Contains(body, "WARNING") || !strings.Contains(body, "New device on the network") {
 		t.Errorf("device page missing assessment or history:\n%s", body)
+	}
+	for _, want := range []string{"Looks like: made by Apple", "Suspicious - check it", "v-suspicious", "Network behaviour", "Asked for an address by DHCP"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("device page missing %q", want)
+		}
 	}
 	if strings.Contains(body, ">other<") || strings.Contains(body, "· other") {
 		t.Errorf("device page shows an event about another device")
