@@ -219,7 +219,28 @@ func (s *Store) SetTrust(key, trust string) (*Profile, error) {
 
 // Save writes the profile atomically: a crash mid-write must not leave a
 // truncated baseline, which would read as "everything is new".
+//
+// Accepts already on disk are merged in first. The resident sensor holds the
+// profile in memory and rewrites the file every cycle, so `baseline accept`
+// run beside it was overwritten within minutes: the accept vanished, the
+// finding came back, and the freeze rule kept refusing to learn the very
+// server the operator had vouched for. Only the operator adds an accept and
+// nothing removes one except Reset, which deletes the file, so a union can
+// only restore what a person said - it cannot hide a finding nobody accepted.
 func (s *Store) Save(p *Profile) error {
+	if b, err := os.ReadFile(s.file(p.Key)); err == nil {
+		var disk Profile
+		if json.Unmarshal(b, &disk) == nil {
+			for h, a := range disk.Accepted {
+				if _, ok := p.Accepted[h]; !ok {
+					if p.Accepted == nil {
+						p.Accepted = map[string]Accept{}
+					}
+					p.Accepted[h] = a
+				}
+			}
+		}
+	}
 	b, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return fmt.Errorf("baseline: %w", err)

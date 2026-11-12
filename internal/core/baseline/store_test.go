@@ -233,3 +233,59 @@ func TestMissingEventLogIsNotAnError(t *testing.T) {
 		t.Errorf("LoadEvents on a fresh store = %v, %v; a sensor that has recorded nothing is not a failure", evs, err)
 	}
 }
+
+// The sensor saves its in-memory profile every cycle. An accept written by the
+// CLI in between must survive that save, or "this was me" lasts two minutes.
+func TestSaveKeepsAnAcceptWrittenByAnotherProcess(t *testing.T) {
+	s := store(t)
+	sensor, _, err := s.Load(ident(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(sensor); err != nil {
+		t.Fatal(err)
+	}
+
+	cli, _, err := s.Load(ident(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli.Accept("abc123", Accept{Vector: "dhcp/unexpected-server", Target: "10.0.4.48"})
+	if err := s.Save(cli); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Save(sensor); err != nil { // stale copy, no accept in memory
+		t.Fatal(err)
+	}
+	back, _, err := s.Load(ident(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.IsAccepted("abc123") {
+		t.Fatal("the sensor's next save erased an accept the operator made")
+	}
+	if !sensor.IsAccepted("abc123") {
+		t.Fatal("the running sensor did not pick the accept up, so it keeps alerting")
+	}
+
+	// The false-positive side: nothing accepted is invented.
+	if back.IsAccepted("other") || len(back.Accepted) != 1 {
+		t.Fatalf("accepted = %v, want only abc123", back.Accepted)
+	}
+
+	// Reset deletes the file; it must not be resurrected from nowhere.
+	if err := s.Reset(sensor.Key); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _, err := s.Load(ident(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(fresh); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.IsAccepted("abc123") {
+		t.Fatal("an accept survived a reset")
+	}
+}

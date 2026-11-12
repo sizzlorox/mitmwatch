@@ -391,6 +391,49 @@ mitmwatch baseline accept <hash>          # the hash is printed with the finding
 mitmwatch profiles trust <key> work       # a managed laptop's private CA is expected here
 ```
 
+Run these with the same privileges as the sensor (`sudo` when it runs as
+root), or the accept lands in your own per-user profile instead of the one the
+sensor reads.
+
+### Moving DHCP to a Pi-hole (or any second box)
+
+Handing out addresses from a Pi-hole, dnsmasq, or a new router looks exactly
+like a rogue DHCP server, because from the wire it is one: a new device started
+handing out network settings. mitmwatch will say so at high, and keep saying so
+on every lease renewal until you vouch for it. That is deliberate — it cannot
+tell your cutover from an attacker's — so tell it once:
+
+1. **Cut over.** Enable DHCP on the Pi-hole and disable it on the router. Give
+   the Pi-hole a static address. Keep the router as the gateway the Pi-hole
+   hands out (Pi-hole: *Settings → DHCP → Router (gateway) IP*); offering any
+   other gateway is a separate, louder finding that you should not accept.
+2. **Wait for the finding.** Within one lease renewal (or force one by
+   reconnecting a device) the sensor reports
+   `dhcp/unexpected-server` for the Pi-hole's address. If the sensor host
+   resolves through something other than the Pi-hole, `dhcp/rogue-dns` may
+   appear beside it, because the offered resolver changed too.
+3. **Check it is really yours.** The finding's `hardware` must be the Pi-hole's
+   MAC (`ip link` on the Pi-hole), `server` its address, and `offered` your
+   router as gateway and the Pi-hole as DNS.
+4. **Accept it**, using the hashes printed with the findings:
+
+   ```
+   sudo mitmwatch baseline accept <unexpected-server hash>
+   sudo mitmwatch baseline accept <rogue-dns hash>      # only if it fired
+   sudo mitmwatch baseline show                         # both listed under accepted findings
+   ```
+
+   The running sensor picks this up at the end of its next cycle, learns the
+   Pi-hole as a known server, and goes quiet.
+
+What stays watched: an accept matches that one finding — that vector, that
+server address — and nothing else. A DHCP server at any other address, the
+Pi-hole offering a different gateway or a WPAD proxy, or two servers answering
+at once (say, the router's DHCP coming back on) all still alert. Someone
+impersonating the Pi-hole's address would also have to win ARP, which the `arp`
+probe watches. If you later move DHCP again, the new server is new again;
+accept it the same way.
+
 ### When something is wrong
 
 | Symptom | Cause |
